@@ -69,6 +69,7 @@ def page(body: str, title: str = "Site") -> str:
             "https://sedo.com/search/details/?domain=x",
             SiteStatus.PARKED,
         ),
+        (402, {}, page("Payment Required"), URL, SiteStatus.SUSPENDED),
         (404, {}, page("Not Found"), URL, SiteStatus.HTTP_ERROR),
         (500, {}, page("Internal error"), URL, SiteStatus.HTTP_ERROR),
         (200, {}, page("<h1>Welcome to nginx!</h1>", "Welcome to nginx!"), URL, SiteStatus.EMPTY),

@@ -11,7 +11,7 @@
 3. [ ] Create the private repo; commit `docs/`, `data/urls.txt`, `CLAUDE.md`, `.gitignore`, `.env.example`
 4. [x] Install Docker Desktop; limit file sharing to the project folder; check Python 3.12
 5. [x] Claude Code session 1 (plan mode first): M1 sandbox, egress proxy, `make selftest`; then the first watched run of triage inside the container
-6. [ ] Log the triage counts; decide the dead-site default verdict
+6. [x] Log the triage counts; decide the dead-site default verdict (Wayback → signals → not_scam; DESIGN §5.2a)
 
 ## Goal
 
@@ -64,7 +64,7 @@ Adjust the hours to the real schedule.
 - [x] Evidence sources: page text, attributes, scripts, **network responses**, **QR codes**, domain signals, brand impersonation, wallet requests (mock wallet), behavior after interaction
 - [x] Stack and agent approach; alternatives recorded (`DESIGN.md` §6)
 - [x] Threat model (`DESIGN.md` §5.6)
-- [ ] Decide dead-site default verdict once triage counts are in
+- [x] Decide dead-site default verdict once triage counts are in (DESIGN §5.2a)
 
 ### M1. Baseline sandbox + triage
 
@@ -93,6 +93,9 @@ Adjust the hours to the real schedule.
 - [ ] Model split: strong model for navigation and judging, `helper_model` (Haiku-class) for cheap helper calls; measure on the first 10 sites before fixing it
 - [ ] `make rescore`: rebuild classifications and `results.json` from saved evidence, no site visits
 - [ ] Unit tests for validators and extractor on fixture pages
+- [ ] Retry `tls_error` and `timeout` sites (incl. #112 ReadTimeout) once in Chromium before treating them as dead
+- [ ] Cloudflare phishing interstitials (#009, #035): verdict scam; try one click through the warning to capture the real page
+- [ ] Wayback recovery for non-live sites (DESIGN §5.2a), **time-boxed to 2h**; else signals-only rule
 
 ### M3. Navigation agent
 
@@ -116,6 +119,7 @@ Adjust the hours to the real schedule.
 - [ ] Internal `uncertain` band, mapped to the binary label for output
 - [ ] Verdict bias: `scam_threshold: 0.45` (lean toward recall); report precision/recall at 0.45 and 0.5 in the README
 - [ ] Re-classify after navigation with the new evidence
+- [ ] Dead-site policy in the scorer: Wayback shrink factor, signals-only band (0.5–0.65), `evidence_source` on every record; calibrate on hand labels incl. dead sites
 - [ ] Hand-label 20-30 sites in `eval/labels.csv` **from saved screenshots and text** (not by revisiting live sites); measure accuracy/precision/recall; tune via `make rescore`
 
 ### M5. Full hardening
@@ -130,6 +134,7 @@ Adjust the hours to the real schedule.
 
 ### M6. Batch run and quality checks
 
+- [ ] Re-run triage on a different day than M1 (sites flap) before the batch
 - [ ] Run all 160 with bounded parallelism and checkpointing (`--resume` works)
 - [ ] Track processed / partial / failed / timed-out counts
 - [ ] Verify exactly one record per input URL
@@ -200,7 +205,7 @@ Adjust the hours to the real schedule.
 | Email verification | One disposable provider; else record `blocked_at` | Bounded effort | Many sites blocked by it |
 | Give-up rule | 4 consecutive failed steps | Bounds time and cost per site | Pilot shows premature give-ups |
 | Freeze points | See Schedule guardrails | Protect docs and submission | — |
-| Dead-site verdict | **Open** (current default: `not_scam`, low confidence) | Can't judge unseen content | After triage counts |
+| Dead-site verdict | Wayback snapshot → normal classifier (shrunk); else domain/sibling/warning signals → lean scam; else `not_scam`, low confidence | 104/160 not live; labels likely from a scam feed | Hand labels on dead sites |
 
 ## Schedule guardrails
 
@@ -221,19 +226,17 @@ Adjust the hours to the real schedule.
 ## Cut list (drop in this order if time runs short)
 
 1. Cloud-server comparison run (bonus: does a datacenter IP see different content?)
-2. Wayback Machine recovery for dead sites
-3. Stagehand trial (unless the pilot demands it)
-4. Mock wallet drainer capture
-5. Highlighted-box screenshots (keep plain screenshots taken at discovery)
-6. Per-account address test (keep the README note)
-7. OCR on non-QR images
-8. Cross-site clustering
+2. Stagehand trial (unless the pilot demands it)
+3. Mock wallet drainer capture
+4. Highlighted-box screenshots (keep plain screenshots taken at discovery)
+5. Per-account address test (keep the README note)
+6. OCR on non-QR images
+7. Cross-site clustering
 
 **Never cut:** address validation, baseline sandboxing (incl. egress proxy + selftest), the navigation agent, the accuracy check, the README.
 
 ## Open questions
 
-- Dead-site default verdict?
 - Which sites in the list are legitimate negatives?
 - Which disposable email provider?
 - Per-task model split: decide after measuring the first 10 sites

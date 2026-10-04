@@ -185,6 +185,8 @@ def classify_response(
     if short and (m := _first_match(lowered, PARKED_PHRASES)):
         return SiteStatus.PARKED, f'parked marker "{m}"'
 
+    if http_status == 402:  # "payment required": hosting/store account unpaid (e.g. Shopify)
+        return SiteStatus.SUSPENDED, "HTTP 402 (hosting/store suspended)"
     if http_status >= 400:
         return SiteStatus.HTTP_ERROR, f"HTTP {http_status}"
 

@@ -139,6 +139,13 @@ class BlockedReason(StrEnum):  # NavigationTrace.blocked_at
     OTHER = "other"
 
 
+class EvidenceSource(StrEnum):  # what the verdict was based on (dead-site policy, DESIGN §5.2a)
+    LIVE = "live"  # the site itself, rendered now
+    WAYBACK = "wayback"  # an archived snapshot; scam_probability shrunk toward 0.5
+    SIGNALS_ONLY = "signals_only"  # domain, sibling-site or warning-page signals, no content
+    NONE = "none"  # nothing to go on: not_scam, low confidence
+
+
 class ProcessingStatus(StrEnum):  # did OUR pipeline finish? (separate from SiteStatus)
     COMPLETED = "completed"
     PARTIAL = "partial"  # timed out / blocked mid-way; evidence so far kept
@@ -307,6 +314,7 @@ class Classification(BaseModel):
     scam_type: ScamType | None
     scam_probability: float = Field(ge=0, le=1)  # fused score (§5.4)
     confidence: float = Field(ge=0, le=1)  # P(verdict is correct), see check_confidence
+    evidence_source: EvidenceSource
     reasoning: str  # human-readable, 1-3 sentences
     signals: list[Signal]
     judgment: LLMJudgment | None  # None if site dead and no content
@@ -443,6 +451,7 @@ class OutputRecord(OutputModel):
     scam_type: ScamType | None
     scam_probability: float = Field(ge=0, le=1)
     confidence: float = Field(ge=0, le=1)  # see check_confidence
+    evidence_source: EvidenceSource
     reasoning: str
     signals: list[str]  # Signal.name values
     crypto_addresses: list[str]  # tier primary, strings as shown

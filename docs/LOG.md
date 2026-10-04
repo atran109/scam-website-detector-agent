@@ -179,3 +179,18 @@ Findings:
 - 402 is better read as `suspended` than `http_error` (proposed classifier tweak, not yet made).
 - Sibling pairs differ: vnexchange.me tls_error vs vnexchange.top timeout; sebca.art 525 vs sebca.sbs DNS failure.
 - Mobile-style hosts: 4 of the ~10 h5./m./web3. hosts are live (055, 057, 067; plus timeouts/522s for the rest).
+
+## 2026-10-04 19:40 · H+? · DECISION: dead-site verdict policy and triage follow-ups
+- **Dead sites (A6, DESIGN §5.2a):** three steps, first match wins:
+  1. Wayback snapshot through the sandbox (archived pages are still hostile) → normal classifier, `scam_probability` shrunk toward 0.5 (`0.5 + 0.8·(p−0.5)`, to calibrate), `evidence_source: wayback`, no navigation.
+  2. Domain / sibling / warning-page signals → lean scam, low confidence (0.5–0.65), `signals_only`.
+  3. Otherwise `not_scam`, p=0.4, `none`.
+
+  Why: 104/160 are not live and labels likely come from a scam feed; `status` + `evidence_source` keep each verdict's basis visible.
+- **Wayback:** moved off the cut list into M2/M4, time-boxed to 2h of build time; if it overruns, the signals-only rule covers it. Archived sightings use `source: archive` with normal tier rules (to revisit if they pollute the primary list).
+- **New `EvidenceSource` enum** (live / wayback / signals_only / none) on `Classification` and `OutputRecord`; §3.4 example and contract table updated.
+- **Cloudflare "Suspected phishing" interstitial** (#009, #035) is a hard rule → scam. In M2, try one click through the warning to capture the real page.
+- **Triage:** HTTP 402 → `suspended` (unpaid hosting/store). Done, with a test.
+- **M2:** retry `tls_error` + `timeout` sites (incl. #112 ReadTimeout) once in Chromium before calling them dead (Python's TLS fingerprint may be cloaked against).
+- **M6:** re-run triage on a different day before the final batch.
+- **README limitations note:** some dead/timeout sites may be geo-blocking a residential US IP rather than down (A13).
