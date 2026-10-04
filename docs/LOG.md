@@ -158,3 +158,24 @@ Run `selftest-5`, container on Docker Desktop 29.8.1 (arm64):
 - Downloads are refused, and egress.log records every request.
 
 Triage probe exercised on safe hosts only (example.com, `.invalid`, expired.badssl.com, neverssl.com): live / dns_failure / invalid-TLS-fetched-unverified / SPA-shell paths all behave as designed. The Docker mount of a path outside the project folder was refused, which suggests file sharing is already restricted (user to confirm). No target site contacted yet.
+
+## 2026-10-04 19:22 · H+? · RESULT: first triage of all 160 URLs (run triage-1)
+Selftest re-ran first (30/30). 160 records, one per URL, about 2 minutes, from a residential US IP through the egress proxy. No target domain hit the egress deny list (all 38 denials in egress.log are selftest probes).
+
+| status | n | what it actually is |
+|---|---|---|
+| live | 56 | 29 content pages, 27 SPA shells (little static text + scripts); 6 with invalid TLS certs (003, 004, 029, 036, 044, 139) |
+| dns_failure | 53 | domain gone |
+| http_error | 23 | 14× Cloudflare 522 + 1× 521/525/526 (origin down), 4× 404 (incl. Azure Front Door), 3× 402 (Shopify-style "payment required": store suspended), 1× 502 |
+| tls_error | 14 | all handshake failures, none cert errors: TLSV1_UNRECOGNIZED_NAME / ALERT_INTERNAL_ERROR / HANDSHAKE_FAILURE (typical of a hostname dropped from Cloudflare or the host), 5 with an empty error |
+| timeout | 10 | 9 connect timeouts (ERR_CONNECT_FAIL 110), 1 ReadTimeout (112) |
+| suspended | 3 | 2× Cloudflare "Suspected phishing" interstitial (009 workers.dev, 035), 1× "account has been suspended" (159) |
+| empty | 1 | default nginx page (153) |
+
+Findings:
+- 104/160 (65%) are not live, so A7 holds and the dead-site default verdict now dominates accuracy. The decision is still open (PLAN M0).
+- The two Cloudflare phishing interstitials are third-party scam evidence for dead sites.
+- tls_error may include TLS-fingerprint cloaking: Python's handshake isn't Chrome's. Recheck those 14 (and the ReadTimeout) with Chromium in M2 before treating them as dead.
+- 402 is better read as `suspended` than `http_error` (proposed classifier tweak, not yet made).
+- Sibling pairs differ: vnexchange.me tls_error vs vnexchange.top timeout; sebca.art 525 vs sebca.sbs DNS failure.
+- Mobile-style hosts: 4 of the ~10 h5./m./web3. hosts are live (055, 057, 067; plus timeouts/522s for the rest).

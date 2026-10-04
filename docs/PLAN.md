@@ -9,8 +9,8 @@
 1. [x] Deadline: none, ASAP (freeze points apply relative to whenever submission is decided)
 2. [x] API key: my own, reimbursed. Set a monthly spend limit in the Anthropic console; keep invoices for reimbursement
 3. [ ] Create the private repo; commit `docs/`, `data/urls.txt`, `CLAUDE.md`, `.gitignore`, `.env.example`
-4. [ ] Install Docker Desktop; limit file sharing to the project folder; check Python 3.12
-5. [ ] Claude Code session 1 (plan mode first): M1 sandbox, egress proxy, `make selftest`; then the first watched run of triage inside the container
+4. [x] Install Docker Desktop; limit file sharing to the project folder; check Python 3.12
+5. [x] Claude Code session 1 (plan mode first): M1 sandbox, egress proxy, `make selftest`; then the first watched run of triage inside the container
 6. [ ] Log the triage counts; decide the dead-site default verdict
 
 ## Goal
@@ -69,14 +69,14 @@ Adjust the hours to the real schedule.
 ### M1. Baseline sandbox + triage
 
 - [x] Where the crawler runs: hardened Docker on my personal Mac (decided; cloud server deferred to future work)
-- [ ] Docker Desktop: limit file sharing to the project folder
-- [ ] `docker-compose.yml`: crawler on an internal-only network; Squid egress proxy denying 10/8, 172.16/12, 192.168/16, 127/8, 169.254/16 and logging requests
-- [ ] `make selftest`: home router, `host.docker.internal` (the Mac itself) and 169.254.169.254 all fail; a normal site succeeds. **Must pass before the first real visit**
-- [ ] Dockerfile: non-root user, Playwright + Chromium, no host mounts except `runs/` and `output/`
-- [ ] Browser baseline: fresh context per URL, downloads blocked, permissions denied, Chromium sandbox on (seccomp profile)
-- [ ] Pulled forward from M5: `cap_drop: ALL`, `no-new-privileges`, CPU/memory/PID limits
-- [ ] Run `triage.py` on all 160 → status buckets
-- [ ] Log the counts in `LOG.md`; revisit time budget
+- [x] Docker Desktop: limit file sharing to the project folder
+- [x] `docker-compose.yml`: crawler on an internal-only network; Squid egress proxy denying 10/8, 172.16/12, 192.168/16, 127/8, 169.254/16 and logging requests
+- [x] `make selftest`: home router, `host.docker.internal` (the Mac itself) and 169.254.169.254 all fail; a normal site succeeds. **Must pass before the first real visit**
+- [x] Dockerfile: non-root user, Playwright + Chromium, no host mounts except `runs/` and `output/`
+- [x] Browser baseline: fresh context per URL, downloads blocked, permissions denied, Chromium sandbox on (seccomp profile)
+- [x] Pulled forward from M5: `cap_drop: ALL`, `no-new-privileges`, CPU/memory/PID limits
+- [x] Run `triage.py` on all 160 → status buckets
+- [x] Log the counts in `LOG.md`; revisit time budget
 
 ### M2. Thin end-to-end
 
