@@ -6,7 +6,7 @@
 
 ## Next actions
 
-1. [ ] Deadline: flexible. Fill in the self-imposed target date above (freeze points key off it)
+1. [x] Deadline: none, ASAP (freeze points apply relative to whenever submission is decided)
 2. [x] API key: my own, reimbursed. Set a monthly spend limit in the Anthropic console; keep invoices for reimbursement
 3. [ ] Create the private repo; commit `docs/`, `data/urls.txt`, `CLAUDE.md`, `.gitignore`, `.env.example`
 4. [ ] Install Docker Desktop; limit file sharing to the project folder; check Python 3.12
@@ -73,7 +73,8 @@ Adjust the hours to the real schedule.
 - [ ] `docker-compose.yml`: crawler on an internal-only network; Squid egress proxy denying 10/8, 172.16/12, 192.168/16, 127/8, 169.254/16 and logging requests
 - [ ] `make selftest`: home router, `host.docker.internal` (the Mac itself) and 169.254.169.254 all fail; a normal site succeeds. **Must pass before the first real visit**
 - [ ] Dockerfile: non-root user, Playwright + Chromium, no host mounts except `runs/` and `output/`
-- [ ] Browser baseline: fresh context per URL, downloads blocked, permissions denied
+- [ ] Browser baseline: fresh context per URL, downloads blocked, permissions denied, Chromium sandbox on (seccomp profile)
+- [ ] Pulled forward from M5: `cap_drop: ALL`, `no-new-privileges`, CPU/memory/PID limits
 - [ ] Run `triage.py` on all 160 → status buckets
 - [ ] Log the counts in `LOG.md`; revisit time budget
 
@@ -119,7 +120,7 @@ Adjust the hours to the real schedule.
 
 ### M5. Full hardening
 
-- [ ] Container: `cap_drop: ALL`, `no-new-privileges`, read-only root filesystem, CPU/memory/PID limits
+- [ ] Container: read-only root filesystem (`cap_drop`, `no-new-privileges` and limits already done in M1)
 - [ ] Re-run `make selftest`; review `egress.log` for anything unexpected
 - [ ] Verify the Chromium sandbox is on inside the container (no silent `--no-sandbox`)
 - [ ] Browser: block non-http(s) schemes and service workers; close popups; no extensions

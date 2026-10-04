@@ -86,8 +86,12 @@ scam-website-detector-agent/
 ├── Dockerfile                   # hardened runtime image (Playwright + Chromium)
 ├── docker-compose.yml           # crawler + egress-proxy services, internal network, limits, cap-drop
 ├── docker/
-│   └── egress-proxy/
-│       └── squid.conf           # denies private/metadata ranges; logs every request
+│   ├── egress-proxy/
+│   │   ├── Dockerfile           # pinned Alpine + Squid, runs as the squid user
+│   │   └── squid.conf           # denies private/metadata ranges; logs every request
+│   ├── seccomp/
+│   │   └── chromium.json        # Docker default + clone/unshare/setns (Playwright v1.63.0) + unconditional chroot, so Chromium's sandbox works under cap_drop ALL
+│   └── selftest.py              # egress + sandbox checks run by `make selftest` inside the crawler container
 ├── Makefile                     # make build / selftest / triage / run / rescore / eval / report / test
 ├── .env.example                 # ANTHROPIC_API_KEY etc. (real .env gitignored)
 │
@@ -392,8 +396,14 @@ class TriageResult(BaseModel):
     final_url: str | None = None
     redirect_chain: list[str] = []
     title: str | None = None
-    error: str | None = None
+    reason: str | None = None      # why this status, e.g. 'parked marker "domain is for sale"'
+    tls_valid: bool | None = None  # False: cert invalid, content fetched unverified (weak scam signal)
+    error: str | None = None       # exception / proxy error text, if any
     elapsed_ms: int
+
+class TriageRecord(BaseModel):     # one line of runs/<ts>/triage.jsonl
+    site: Site
+    triage: TriageResult
 
 # ---------- Capture ----------
 class NetworkRecord(BaseModel):
@@ -744,6 +754,15 @@ agent:
   max_consecutive_failures: 4       # then stop with blocked_at / no_progress
   trigger: "scam_or_uncertain"      # when to navigate
   target_assets: [BTC, ETH, USDT-ERC20, USDT-TRC20, USDC-ERC20, USDC-TRC20]
+triage:
+  concurrency: 20                   # plain HTTP, so higher than the browser stages
+  timeout_s: 20
+  max_body_bytes: 524288            # read at most 512 KB per probe
+  max_redirects: 10
+  retries: 1                        # on timeout / connection error only
+http:
+  chrome_major_version: 154         # current stable Chrome; UA + client hints are built from it
+  accept_language: "en-US,en;q=0.9"
 llm:
   judge_model: "<sonnet-class>"
   navigator_model: "<sonnet-class>"
@@ -865,6 +884,14 @@ flowchart LR
 
 **Design principle:** use the LLM only where judgment is needed (classifying, choosing the next click). Everything else (probing, capturing, regexes, checksums, deduplication, writing output) is deterministic code that can be tested.
 
+### 5.1a Triage (`triage/liveness.py`)
+
+One GET per URL through the egress proxy, with a current desktop Chrome User-Agent plus matching `Accept`, `Accept-Language` and client-hint headers (some scam sites cloak against non-browser clients; the TLS fingerprint is still httpx's, so capture in a real browser remains the ground truth). HTTP redirects are followed and recorded; JS redirects are capture's job.
+
+- **Proxy errors.** For https URLs the proxy failure arrives as a bare `ProxyError("503 …")`. Squid's `X-Squid-Error` header on the CONNECT response is read through httpx's `trace` request extension: `ERR_DNS_FAIL` → `DNS_FAILURE`, `ERR_CONNECT_FAIL` → `CONNECTION_ERROR` (or `TIMEOUT` if it took the full connect timeout), `ERR_ACCESS_DENIED` → `CONNECTION_ERROR` with reason "egress policy: private destination" (a finding in itself).
+- **Invalid TLS.** On a certificate error the probe is retried unverified. If content comes back, the site is classified from it as usual and `tls_valid=false` is recorded (a weak scam signal). Capture later uses `ignore_https_errors` for these sites: TLS protects against interception, which is not our threat; content is treated as hostile either way.
+- **Status from content.** A pure function maps (HTTP status, headers, body, final URL) to `SiteStatus` + `reason`: parked, suspended, challenge, geo-block, empty/default page, HTTP error, else live. An SPA shell (`<div id="app">` + scripts) is live.
+
 ### 5.2 Per-site state machine (`pipeline.py`)
 
 ```mermaid
@@ -913,7 +940,7 @@ snapshot ─► patterns.py   finds candidates in: visible text, attributes, scr
 **Classification (`classify/`):**
 
 1. `domain.py` + `signals.py` produce weighted `Signal`s: typosquat distance to `brands.yaml`, cheap TLD, guaranteed returns ("% daily," "risk-free"), invite-code fields, seed-phrase inputs, countdown/urgency, fake licensing claims, mismatched branding, missing company info.
-   Each signal has a **tier**: **strong** (seed-phrase field on a non-wallet domain, brand impersonation on a foreign domain, guaranteed returns, send-to-receive giveaway: one is near-decisive), **moderate** (invite code required, very new domain, cheap TLD or free hosting, fake licensing claims, pressure tactics, withdrawal fees: several together make a case), **weak** (shows a crypto address, shows none, unpolished design: never decisive alone).
+   Each signal has a **tier**: **strong** (seed-phrase field on a non-wallet domain, brand impersonation on a foreign domain, guaranteed returns, send-to-receive giveaway: one is near-decisive), **moderate** (invite code required, very new domain, cheap TLD or free hosting, fake licensing claims, pressure tactics, withdrawal fees: several together make a case), **weak** (shows a crypto address, shows none, unpolished design, invalid TLS certificate from triage: never decisive alone).
 2. `llm_judge.py` sends Claude a screenshot, sanitized text excerpt, and the signal list, and asks for an `LLMJudgment` (structured output) that must **quote** its evidence.
 3. `scorer.py` fuses them:
    - **Hard rules first:** seed-phrase field on a non-wallet domain → scam (`scam_probability` ≥0.9). Parked / empty → `not_scam` with status rule.
@@ -980,9 +1007,9 @@ A rejected action is fed back to the model as a tool error, so it can choose som
 | Layer | Controls | Threat addressed |
 |---|---|---|
 | **Host** | Personal Mac with Docker Desktop, which runs containers inside a Linux VM (an extra boundary). Docker Desktop file sharing limited to the project folder; only `runs/` and `output/` mounted. Optional: run on the router's guest Wi-Fi to isolate other home devices | Escape beyond the container; exposure of personal files |
-| **Container** | Non-root user, `cap_drop: ALL`, `no-new-privileges`, default seccomp, read-only root filesystem except `/app/runs` and `/app/output` volumes, CPU/memory/PID limits, no host mounts besides those two | Browser exploit → host compromise |
-| **Network** | Crawler container sits on an **internal-only** Docker network with no direct internet route. Its only way out is an **egress proxy container** (Squid) that denies, by resolved destination IP, private, loopback and link-local ranges (10/8, 172.16/12, 192.168/16, 127/8, 169.254/16 incl. cloud metadata) and logs every request. Chromium launched with `--proxy-server`. `make selftest` must show that the home router, `host.docker.internal` (the Mac itself) and the metadata address all fail, and a normal site succeeds | Scam pages probing the home network/router (SSRF-style); unlogged traffic |
-| **Browser** | Chromium sandbox **on**, verified inside the container (no silent `--no-sandbox`; if it's unavoidable, documented); fresh context per site; downloads denied; permissions denied (notifications, camera, mic, geolocation, clipboard read); no extensions; non-http(s) schemes aborted via routing; service workers blocked; popups captured and closed | Drive-by downloads, persistence, cross-site leakage |
+| **Container** | Non-root user, `cap_drop: ALL`, `no-new-privileges`, CPU/memory/PID limits (all from M1); seccomp = Docker default plus `clone`/`unshare`/`setns`/`chroot` for Chromium's sandbox (`docker/seccomp/chromium.json`; the kernel still checks capabilities per namespace, so the container user gains nothing); read-only root filesystem (M5) except `/app/runs` and `/app/output` volumes, CPU/memory/PID limits, no host mounts besides those two | Browser exploit → host compromise |
+| **Network** | Crawler container sits on an **internal-only** Docker network with no direct internet route. Its only way out is an **egress proxy container** (Squid) that denies, by resolved destination IP, private, loopback and link-local ranges (10/8, 172.16/12, 192.168/16, 127/8, 169.254/16 incl. cloud metadata, plus 100.64/10 CGNAT/Tailscale, 0/8, 198.18/15, multicast/reserved, IPv6 `::1`, `fc00::/7`, `fe80::/10`), allows only ports 80/443, and logs every request. Chromium launched with `--proxy-server`. `make selftest` must show that the home router, `host.docker.internal` (the Mac itself) and the metadata address all fail, and a normal site succeeds | Scam pages probing the home network/router (SSRF-style); unlogged traffic |
+| **Browser** | Chromium sandbox **on** (`chromium_sandbox=True`; Playwright's default adds `--no-sandbox`), verified inside the container by `make selftest` (renderers run seccomp-filtered in their own user namespace); fresh context per site; downloads denied; permissions denied (notifications, camera, mic, geolocation, clipboard read); no extensions; non-http(s) schemes aborted via routing; service workers blocked; popups captured and closed | Drive-by downloads, persistence, cross-site leakage |
 | **Application** | Action whitelist; same-domain `goto`; identity placeholders; payment and sign actions blocked; per-site budgets | Agent doing something harmful or costly |
 | **LLM** | Page content wrapped in delimited "untrusted data" blocks (`sanitize.py`); system prompt says to ignore embedded instructions; structured outputs validated by Pydantic; LLM output never executed as code | Prompt injection steering the classifier or agent |
 | **Secrets** | API key only via env var in `.env` (gitignored); never written to logs or traces; synthetic credentials stored per site for reproducibility | Key leakage |

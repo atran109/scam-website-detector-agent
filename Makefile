@@ -1,9 +1,15 @@
 # Targets from docs/DESIGN.md §2.4. Unimplemented ones fail loudly so a stub never looks like a pass.
+# Anything that contacts real sites depends on `selftest`, so it can't run unless isolation is proven.
 PYTHON ?= python3.12
 VENV := .venv
 BIN := $(VENV)/bin
 
-.PHONY: build selftest triage run rescore eval report test lint venv
+RUN_ID ?= $(shell date +%Y-%m-%dT%H-%M-%S)
+# The Mac's default gateway (home router), so selftest proves the proxy blocks it.
+ROUTER_IP ?= $(shell route -n get default 2>/dev/null | awk '/gateway:/{print $$2}')
+COMPOSE := RUN_ID=$(RUN_ID) SELFTEST_ROUTER_IP=$(ROUTER_IP) docker compose
+
+.PHONY: build selftest triage run rescore eval report test lint venv down
 
 $(BIN)/python: pyproject.toml
 	$(PYTHON) -m venv $(VENV)
@@ -17,18 +23,23 @@ test: venv
 	$(BIN)/pytest -q
 
 lint: venv
-	$(BIN)/ruff check src tests eval
+	$(BIN)/ruff check src tests eval docker
 
 build:
-	@echo "make build: not implemented (M1: docker build)"; exit 1
+	$(COMPOSE) build
 
-selftest:
-	@echo "make selftest: not implemented (M1: egress/isolation checks)"; exit 1
+selftest: build
+	@mkdir -p runs/$(RUN_ID)
+	$(COMPOSE) up -d --force-recreate --wait egress-proxy
+	$(COMPOSE) run --rm crawler python docker/selftest.py
 
-triage:
-	@echo "make triage: not implemented (M1)"; exit 1
+triage: selftest
+	$(COMPOSE) run --rm crawler scamhunter triage --run-id $(RUN_ID) $(ARGS)
 
-run:
+down:
+	docker compose down
+
+run: selftest
 	@echo "make run: not implemented (M2)"; exit 1
 
 rescore:

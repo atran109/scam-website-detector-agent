@@ -130,3 +130,31 @@ Skeleton built per DESIGN §2.1; Dockerfile, docker-compose.yml and squid.conf d
 
 ## 2026-10-04 18:11 · H+? · TODO-LATER: AgentAction arguments (M3)
 `AgentAction` has only `value`/`url`/`x`/`y`/`element_id`, but §5.5 tools take `option` (select), `key` (press), `direction` (scroll), `seconds` (wait), `reason` + `blocked_at` (done). Left as specified for now. In M3, decide between overloading `value` and adding typed fields (preferred: typed fields with `blocked_at: BlockedReason`), then update DESIGN §3.3.
+
+## 2026-10-04 18:58 · H+? · DECISION: M1 sandbox, egress proxy and triage design
+- Target date: none, ASAP (PLAN updated).
+- **Squid error codes through httpx.** Tested: for https URLs a proxy failure surfaces only as `ProxyError("503 Service Unavailable")`; X-Squid-Error is not in the exception. But httpx's documented `trace` request extension sees the CONNECT response headers, giving `ERR_DNS_FAIL` / `ERR_CONNECT_FAIL <errno>` / `ERR_ACCESS_DENIED`. Used that instead of the planned DNS-over-HTTPS fallback: same information, no third party. errno 110 → TIMEOUT.
+- **Invalid TLS:** retry unverified; classify from content; record `tls_valid=false` as a weak scam signal (DESIGN §5.4, §5.1a). Capture will use `ignore_https_errors` for those sites.
+- **Models:** `TriageResult.reason`, `TriageResult.tls_valid`, `TriageRecord`. Settings gain `triage:` and `http:` sections; `config.py` loads them as strict typed models.
+- **Browser-like headers:** Chrome 154 on Windows UA + matching Accept, Accept-Language, Accept-Encoding (br/zstd decoders added), sec-ch-ua and Sec-Fetch headers. Limitation: TLS/HTTP2 fingerprint is still httpx's.
+- **Squid image:** own Dockerfile on digest-pinned Alpine 3.22 with squid=6.12-r0, run as the squid user. Deny list extends PLAN's with 100.64/10 (CGNAT/Tailscale), 0/8, 198.18/15, multicast/reserved, IPv6 loopback/ULA/link-local; ports 80/443 only; no X-Forwarded-For or Via.
+- **Hardening pulled forward from M5:** `cap_drop: ALL`, `no-new-privileges`, memory/PID/CPU limits on both containers.
+- **Chromium sandbox under cap_drop ALL:** Playwright's default adds `--no-sandbox`, so we launch with `chromium_sandbox=True` and Playwright's seccomp profile (v1.63.0: Docker default + clone/unshare/setns). The first launch aborted with `sys_chroot(...) failed`, because Docker's profile allows `chroot` only if the container has CAP_SYS_CHROOT. Fix: made `chroot` unconditional in our copy instead of `cap_add: SYS_CHROOT`. The kernel still checks the capability per namespace, so the container user (CapEff=0) can't chroot; only Chromium's sandboxed child in its own user namespace can. This is the only change from the vendored file, and a test asserts it.
+- Full Chromium in new headless mode (`channel="chromium"`) rather than the headless shell: harder for scam kits to detect.
+- **Code-level gates:** `require_egress_proxy()` refuses to contact sites unless EGRESS_PROXY is set and `/.dockerenv` exists; `make triage`/`make run` depend on `make selftest`.
+- `REPO_ROOT` comes from `SCAMHUNTER_HOME` in the container (the package is installed into site-packages there).
+
+## 2026-10-04 18:58 · H+? · RESULT: make selftest passes (30/30)
+Run `selftest-5`, container on Docker Desktop 29.8.1 (arm64):
+- Non-root (uid 10001), CapEff=0.
+- No direct route out (1.1.1.1:443 unreachable); no external DNS inside the container.
+- Through httpx and through Chromium, all denied with `ERR_ACCESS_DENIED`:
+  - home router 192.168.0.1, 169.254.169.254, host/gateway.docker.internal, 127.0.0.1;
+  - the proxy's own manager;
+  - DNS tricks localtest.me and 169.254.169.254.nip.io;
+  - port 8080.
+- https://example.com loads.
+- No `--no-sandbox`. Renderer has Seccomp=2 in its own user namespace.
+- Downloads are refused, and egress.log records every request.
+
+Triage probe exercised on safe hosts only (example.com, `.invalid`, expired.badssl.com, neverssl.com): live / dns_failure / invalid-TLS-fetched-unverified / SPA-shell paths all behave as designed. The Docker mount of a path outside the project folder was refused, which suggests file sharing is already restricted (user to confirm). No target site contacted yet.

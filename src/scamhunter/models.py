@@ -197,8 +197,15 @@ class TriageResult(BaseModel):
     final_url: str | None = None
     redirect_chain: list[str] = []
     title: str | None = None
-    error: str | None = None
+    reason: str | None = None  # why this status, e.g. 'parked marker "domain is for sale"'
+    tls_valid: bool | None = None  # False: cert invalid, content fetched unverified (weak signal)
+    error: str | None = None  # exception / proxy error text, if any
     elapsed_ms: int
+
+
+class TriageRecord(BaseModel):  # one line of runs/<ts>/triage.jsonl
+    site: Site
+    triage: TriageResult
 
 
 # ---------- Capture ----------

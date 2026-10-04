@@ -1,0 +1,9 @@
+# Keep secrets, local state and artifacts out of the build context.
+.env
+.git
+.venv
+runs
+output
+**/__pycache__
+.pytest_cache
+.ruff_cache

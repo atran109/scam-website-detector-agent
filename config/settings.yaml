@@ -18,6 +18,15 @@ agent:
   max_consecutive_failures: 4       # then stop with blocked_at / no_progress
   trigger: "scam_or_uncertain"      # when to navigate
   target_assets: [BTC, ETH, USDT-ERC20, USDT-TRC20, USDC-ERC20, USDC-TRC20]
+triage:
+  concurrency: 20                   # plain HTTP, so higher than the browser stages
+  timeout_s: 20
+  max_body_bytes: 524288            # read at most 512 KB per probe
+  max_redirects: 10
+  retries: 1                        # on timeout / connection error only
+http:
+  chrome_major_version: 154         # current stable Chrome; UA + client hints are built from it
+  accept_language: "en-US,en;q=0.9"
 llm:
   judge_model: "<sonnet-class>"
   navigator_model: "<sonnet-class>"

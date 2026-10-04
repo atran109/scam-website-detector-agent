@@ -6,7 +6,13 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 # Pinned exactly for reproducibility. Add each dependency in the milestone that first uses it.
 dependencies = [
+    "brotli==1.2.0",          # httpx decoding for Accept-Encoding: br
+    "httpx==0.28.1",
+    "playwright==1.63.0",     # keep in sync with PLAYWRIGHT_VERSION in Dockerfile (tested)
     "pydantic==2.13.5",
+    "pyyaml==6.0.3",
+    "tldextract==5.4.0",
+    "zstandard==0.25.0",      # httpx decoding for Accept-Encoding: zstd
 ]
 
 [project.optional-dependencies]

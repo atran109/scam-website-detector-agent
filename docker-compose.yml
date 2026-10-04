@@ -1,0 +1,40 @@
+# Crawler + egress proxy (DESIGN §5.6). The crawler has no route out except the proxy.
+name: scamhunter
+
+services:
+  egress-proxy:
+    build: docker/egress-proxy
+    networks: [internal, egress]
+    volumes:
+      - ./runs/${RUN_ID:-adhoc}:/var/log/squid    # egress.log lands in the run directory
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 128
+    cpus: 1
+
+  crawler:
+    build: .
+    networks: [internal]                          # internal only: no direct internet route
+    depends_on: [egress-proxy]
+    environment:
+      RUN_ID: ${RUN_ID:-adhoc}
+      EGRESS_PROXY: http://egress-proxy:3128
+      SELFTEST_ROUTER_IP: ${SELFTEST_ROUTER_IP:-}
+    volumes:                                      # the only host mounts
+      - ./runs:/app/runs
+      - ./output:/app/output
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+      - "seccomp=docker/seccomp/chromium.json"    # Docker default + userns syscalls for Chromium's sandbox
+    mem_limit: 4g
+    pids_limit: 1024
+    cpus: 4
+    shm_size: 1g                                  # Chromium uses /dev/shm heavily
+    init: true                                    # reap orphaned browser processes
+
+networks:
+  internal:
+    internal: true
+  egress: {}
