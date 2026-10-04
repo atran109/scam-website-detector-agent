@@ -4,8 +4,6 @@
 
 **Submission:** private GitHub repo shared with `@rraina`
 
-**Target date:** <FILL IN>. Feature freeze at target −6h, code freeze at −3h (see Schedule guardrails).
-
 ## Next actions
 
 1. [ ] Deadline: flexible. Fill in the self-imposed target date above (freeze points key off it)
@@ -70,7 +68,6 @@ Adjust the hours to the real schedule.
 
 ### M1. Baseline sandbox + triage
 
-- [ ] Set a spend limit in the Anthropic console
 - [x] Where the crawler runs: hardened Docker on my personal Mac (decided; cloud server deferred to future work)
 - [ ] Docker Desktop: limit file sharing to the project folder
 - [ ] `docker-compose.yml`: crawler on an internal-only network; Squid egress proxy denying 10/8, 172.16/12, 192.168/16, 127/8, 169.254/16 and logging requests

@@ -126,7 +126,6 @@ Skeleton built per DESIGN §2.1; Dockerfile, docker-compose.yml and squid.conf d
 - `Identity.identity_id` added; `BlockedReason` enum added (invite_code, sms_verification, email_verification, captcha, kyc, geo_block, payment_required, other) and used for `blocked_at`; `SiteStatus.GEO_BLOCKED` added.
 - `dedupe_key`: EVM → lowercased `normalized`, others → `normalized` unchanged.
 - `cli.py` gains `rescore`; `selftest` stays Makefile-only. `report` added to the §2.1 Makefile comment. Unused `HttpUrl` import dropped.
-- PLAN: target date placeholder added (still <FILL IN>); M1 key item → "set a spend limit in the Anthropic console"; key-budget open question dropped.
 - `data/urls.txt`: 160 URLs, no duplicates, no trailing newline. The loader must not dedupe and must keep paths.
 
 ## 2026-10-04 18:11 · H+? · TODO-LATER: AgentAction arguments (M3)
