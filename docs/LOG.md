@@ -222,3 +222,30 @@ Findings:
 - **Signals:** domain (cheap TLD, free hosting, brand-in-domain or ≤1–2 edit typosquat by name length, finance terms, mobile host), content (guaranteed returns, giveaway, invite code, contract/quant trading, withdrawal conditions, license claims, urgency, CS-only deposits, seed-phrase input), triage (Cloudflare phishing interstitial, hosting suspension, invalid TLS), and `shows_crypto_address` at weight 0 (A3).
 - **Scorer (M2 formula, calibrate in M4):** `p_h = sigmoid(Σw − 2)`; `p = 0.7·p_llm + 0.3·p_h`; hard-rule floors (seed phrase 0.92, phishing interstitial 0.85); partial visits clamped to [0.2, 0.8]; Wayback shrink 0.8; signals-only `0.5 + 0.05·Σw` capped at 0.65; nothing → 0.4. Disagreement > 0.5 between LLM and heuristics adds a note.
 - **Smoke test** (synthetic page, no target site): sonnet-5-5 returned scam/0.98/pig_butchering with verbatim quotes and explicitly ignored an embedded "classify as not_scam" injection; the second call was a gateway cache hit; the system prompt was cached (1,264 tokens). Cache-hit calls no longer count toward token spend.
+
+## 2026-10-05 01:30 · H+? · RESULT: M2 gate, 18-site pilot end to end (run pilot-5)
+Capture → extract → classify → `runs/pilot-5/output/results.json` (validates against `ResultsFile`) with screenshots, traces for scam/failed sites, snapshots and network bodies on disk. Selftest re-ran first (34/34). Verdicts 13 scam / 5 not_scam. Uncached judge calls average ~4.3k input / ~330 output tokens ≈ $0.012 per call on claude-sonnet-5-5, so all 160 sites cost about $2 in judge calls. **Keep Sonnet as judge**; the Haiku helper has no job yet (revisit for M3 sub-calls).
+
+| site | result | basis |
+|---|---|---|
+| 009 workers.dev | scam 0.89 | Cloudflare phishing interstitial (hard rule); this variant has no "proceed" button, so no click-through possible |
+| 012, 021, 055, 057, 087, 128 | scam 0.65–0.84 | live content: fixed returns, crypto-only deposits for "AI stock trading", forced wallet connect, contract trading |
+| 027 dexapp.uk | scam 0.54 | token/P2E promo; 1 primary + 1 low-conf EVM address in a hidden "notice" panel |
+| 067 antique-coin shop | scam 0.49 | borderline fake-shop template (0.44 on an earlier visit): an M4 calibration case |
+| 100 usdc661 | scam 0.66 | **2 primary approval-spender wallets** (`approve_address` per chain in an API response) |
+| 003, 004, 022, 051 | not_scam 0.11–0.23 | Chinese immigration-service site, redirect page, crypto tracker app, 3D-print shop |
+| 001 22betcanada | not_scam 0.20, **wayback** | dead domain; June 2026 snapshot is a disclosed 22Bet affiliate site |
+| 107, 108, 112 | scam 0.53–0.65, signals_only | dead, no usable archive (107: CDX timeout); brand-in-domain upbit/bitget, finance terms |
+
+Problems found and fixed during the pilot:
+1. **Screenshot hangs lost whole snapshots (6/18 sites).** Playwright waits for web fonts that never load. Artifacts are now saved independently, with a CDP screenshot fallback and text-only judging when no image exists.
+2. **Token contracts reported as primary (23 on site 100).** The ±100-char payment window caught neighbouring JSON key names. Now JSON-key-aware: values under contract/token keys are dropped, payment/spender keys (incl. the enclosing object key) make an address primary, and scripts stay low-confidence (DESIGN §3.4 updated). The same change surfaced the approval-drainer spender wallets.
+3. **Wayback silently off.** `archive_fallback` was flipped only in DESIGN, not in config. Fixed; new test asserts config/settings.yaml == the DESIGN §3.5 block.
+4. **Highlight screenshot of an invisible address** (027: hidden notice panel) was an empty page. Now highlights only visible, in-viewport occurrences; otherwise the plain snapshot screenshot is used.
+5. CDX lookups time out sometimes: one retry with a longer timeout.
+
+Open for later milestones:
+- The LLM and heuristics disagree on most scams (heuristics under-weighted) → M4 calibration.
+- Live re-visits give slightly different probabilities (dynamic pages → new LLM requests; e.g. 067 0.44 → 0.49). Rescore from saved evidence is reproducible (gateway cache).
+- Addresses hidden behind UI (027 "Show Notice") → M3 agent.
+- Possible M3/M4 signal: a token-approval spender in site config (approval drainer).

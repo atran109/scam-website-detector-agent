@@ -28,6 +28,7 @@ from scamhunter.browser.capture import (
     take_snapshot,
 )
 from scamhunter.browser.sandbox import launch_browser, new_context
+from scamhunter.browser.wayback import usable_captures
 from scamhunter.classify.domain import domain_signals, load_brands
 from scamhunter.classify.llm_judge import judge
 from scamhunter.classify.scorer import score_content, score_without_content
@@ -222,6 +223,8 @@ async def _open_and_snapshot(
                     ctx.run_dir,
                 )
             )
+        elif "suspected phishing" in text.lower():
+            notes.append("phishing warning page offers no way through (no proceed button)")
         await _highlight_new_addresses(ctx, site, page, snapshots[-1])
     except PlaywrightError as exc:
         notes.append(f"browser: {str(exc).splitlines()[0][:200]}")
@@ -281,8 +284,7 @@ def _apply_highlights(
 ) -> list[CryptoAddress]:
     path = site_dir / "highlights.json"
     highlights = json.loads(path.read_text()) if path.exists() else {}
-    shots = {s.snapshot_id: s.screenshot_path for s in snapshots}
-    fallback = shots[snapshots[-1].snapshot_id] if snapshots else None
+    fallback = next((s.screenshot_path for s in reversed(snapshots) if s.screenshot_path), None)
     out = []
     for a in addresses:
         hl = highlights.get(a.dedupe_key)
@@ -299,6 +301,15 @@ def _apply_highlights(
         ]
         out.append(a.model_copy(update={"sightings": sightings}))
     return out
+
+
+def _archived_note(snapshot: PageSnapshot, triage: TriageResult) -> str:
+    m = re.search(r"/web/(\d{4})(\d{2})(\d{2})\d*id_/", snapshot.url)
+    when = f" from {m.group(1)}-{m.group(2)}-{m.group(3)}" if m else ""
+    return (
+        f"This is an archived Wayback Machine snapshot{when}; the live site is now "
+        f"{triage.status.value}. Judge the site as it was when archived."
+    )
 
 
 @dataclass
@@ -341,11 +352,14 @@ async def analyze(
         )
 
     addresses: list[CryptoAddress] = []
+    ignored: list[str] = []
     for snap in snapshots:
         addresses = merge_all(
-            addresses, extract(load_snapshot_content(snap, ctx.run_dir), ctx.blocklist)
+            addresses, extract(load_snapshot_content(snap, ctx.run_dir), ctx.blocklist, ignored)
         )
     addresses = _apply_highlights(addresses, ctx.site_dir(site), snapshots)
+    if ignored:
+        notes.append(f"ignored {len(set(ignored))} token-contract address(es) in API/script data")
 
     # Judge the last snapshot: after a mobile retry or warning click-through, it's the real page.
     last = snapshots[-1]
@@ -364,13 +378,13 @@ async def analyze(
             title=last.title,
             status_note=_status_note(triage),
             page_text=content.visible_text,
-            screenshot_png=(ctx.run_dir / last.screenshot_path).read_bytes(),
+            screenshot_png=(ctx.run_dir / last.screenshot_path).read_bytes()
+            if last.screenshot_path
+            else None,
             signals=signals,
             addresses=addresses,
             effort=settings.llm.judge_effort,
-            archived_note="This is an archived Wayback Machine snapshot."
-            if content.archived
-            else "",
+            archived_note=_archived_note(last, triage) if content.archived else "",
         )
     except LLMError as exc:
         notes.append(f"LLM judgment unavailable, heuristics only: {exc}")
@@ -454,6 +468,44 @@ def _keep_trace(site_dir: Path, result: SiteResult, run_dir: Path) -> str | None
 
 
 # ============================================================
+# Wayback recovery (dead-site policy step 1)
+# ============================================================
+
+
+async def recover_from_wayback(ctx: RunContext, site: Site) -> tuple[list[PageSnapshot], list[str]]:
+    """Render the newest usable archived snapshot in the sandboxed browser."""
+    settings = ctx.settings
+    client = make_client(ctx.proxy, settings.http, settings.triage, verify=True)
+    async with client:
+        captures, notes = await usable_captures(client, site.url)
+    snapshots: list[PageSnapshot] = []
+    site_dir = ctx.site_dir(site)
+    for capture in captures:
+        context = await new_context(
+            ctx.browser,
+            settings.browser,
+            mobile=_is_mobile(settings, site.url),
+            accept_language=settings.http.accept_language,
+        )
+        page = await context.new_page()
+        recorder = NetworkRecorder(site_dir, ctx.run_dir)
+        recorder.attach(page)
+        try:
+            await page.goto(capture.raw_url, wait_until="domcontentloaded")
+            snapshots.append(
+                await take_snapshot(
+                    page, recorder, DiscoveryStage.LANDING, "w01", site_dir, ctx.run_dir
+                )
+            )
+            notes.append(f"classified from Wayback snapshot {capture.timestamp}")
+        except PlaywrightError as exc:
+            notes.append(f"wayback render failed: {str(exc).splitlines()[0][:150]}")
+        finally:
+            await context.close()
+    return snapshots, notes
+
+
+# ============================================================
 # One site, live
 # ============================================================
 
@@ -488,6 +540,10 @@ async def process_site(ctx: RunContext, site: Site, triage: TriageResult) -> Sit
             else:
                 notes.append(f"Chromium recheck also failed ({triage.status.value})")
                 snapshots = []
+
+    if not snapshots and ctx.settings.features.archive_fallback:
+        snapshots, wayback_notes = await recover_from_wayback(ctx, site)
+        notes += wayback_notes
 
     # Capture-time facts that rescore must keep (it re-derives everything else).
     (site_dir / "capture.json").write_text(json.dumps({"notes": notes, "partial": partial}))

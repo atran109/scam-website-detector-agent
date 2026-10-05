@@ -133,3 +133,32 @@ def test_decode_qr_round_trip() -> None:
     Image.frombytes("L", (view.shape[1], view.shape[0]), view.tobytes()).save(buf, "PNG")
     assert decode_qr(buf.getvalue()) == [text]
     assert decode_qr(b"not an image") == []
+
+
+def test_json_keys_drop_contracts_and_promote_spenders() -> None:
+    """Pilot finding (site 100): a coin-list API lists token contracts; a config API lists
+    the approval spender wallets per chain."""
+    coins = json.dumps(
+        [
+            {
+                "title": "SHIB",
+                "contract_address": A["evm"],
+                "withdrawal_threshold": "0",
+                "deposit_min": "1",
+            }
+        ]
+    )
+    config = json.dumps({"approve_address": {"TRX": A["tron1"], "ETH": A["evm_lower"]}})
+    ignored: list[str] = []
+    content = snapshot(
+        "<p></p>",
+        network=[
+            NetworkBody("https://x/api/coins", "xhr", coins),
+            NetworkBody("https://x/api/config", "xhr", config),
+        ],
+    )
+    found = {a.address: a for a in extract(content, BLOCKLIST, ignored)}
+    assert A["evm"] not in found and ignored == [A["evm"]]
+    assert found[A["tron1"]].tier == AddressTier.PRIMARY
+    assert found[A["evm_lower"]].tier == AddressTier.PRIMARY
+    assert any(lab.asset == Asset.TRX for lab in found[A["tron1"]].labels)

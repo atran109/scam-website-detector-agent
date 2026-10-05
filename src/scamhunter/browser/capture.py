@@ -1,6 +1,7 @@
 """Turn a live page into a PageSnapshot (DOM, a11y tree, screenshot, network log, trace)."""
 
 import asyncio
+import base64
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -81,6 +82,42 @@ class NetworkRecorder:
         return new
 
 
+MAX_SCREENSHOT_CSS_HEIGHT = 8000
+
+
+async def safe_screenshot(page: Page, full_page: bool) -> bytes | None:
+    """Screenshot that never hangs the pipeline.
+
+    Playwright's screenshot waits for web fonts; scam pages often load fonts from hosts that
+    never answer, so it can time out. Fall back to CDP Page.captureScreenshot, which doesn't
+    wait. None if both fail (the snapshot is still recorded, without an image)."""
+    try:
+        return await page.screenshot(full_page=full_page, timeout=10000)
+    except PlaywrightError:
+        pass
+    try:
+        cdp = await page.context.new_cdp_session(page)
+        params: dict = {"format": "png"}
+        if full_page:
+            metrics = await cdp.send("Page.getLayoutMetrics")
+            size = metrics["cssContentSize"]
+            params |= {
+                "captureBeyondViewport": True,
+                "clip": {
+                    "x": 0,
+                    "y": 0,
+                    "width": size["width"],
+                    "height": min(size["height"], MAX_SCREENSHOT_CSS_HEIGHT),
+                    "scale": 1,
+                },
+            }
+        data = await cdp.send("Page.captureScreenshot", params)
+        await cdp.detach()
+        return base64.b64decode(data["data"])
+    except (PlaywrightError, KeyError):
+        return None
+
+
 async def _settle(page: Page, network_idle_ms: int) -> None:
     """Wait for the page to quiet down, bounded: scam SPAs often never reach network idle."""
     try:
@@ -119,7 +156,8 @@ async def take_snapshot(
     run_dir: Path,
     network_idle_ms: int = 8000,
 ) -> PageSnapshot:
-    """Settle the page, then save HTML, visible text, aria snapshot, screenshot, QR decodes."""
+    """Settle the page, then save HTML, visible text, aria snapshot, screenshot, QR decodes.
+    Each artifact is saved independently: one failing never loses the snapshot."""
     await _settle(page, network_idle_ms)
     snap_dir = site_dir / "snapshots" / snapshot_id
     snap_dir.mkdir(parents=True, exist_ok=True)
@@ -127,8 +165,7 @@ async def take_snapshot(
     def rel(name: str) -> str:
         return str((snap_dir / name).relative_to(run_dir))
 
-    html = await _html(page)
-    (snap_dir / "page.html").write_text(html)
+    (snap_dir / "page.html").write_text(await _html(page))
     text = await _visible_text(page)
     (snap_dir / "text.txt").write_text(text)
     try:
@@ -136,23 +173,25 @@ async def take_snapshot(
     except PlaywrightError:
         aria = ""
     (snap_dir / "aria.yaml").write_text(aria)
+    png = await safe_screenshot(page, full_page=True) or await safe_screenshot(page, False)
+    if png:
+        (snap_dir / "screenshot.png").write_bytes(png)
+    (snap_dir / "qr.json").write_text(json.dumps(decode_qr(png) if png else []))
     try:
-        png = await page.screenshot(full_page=True, timeout=15000)
+        title = await page.title()
     except PlaywrightError:
-        png = await page.screenshot(timeout=15000)  # very tall pages: viewport only
-    (snap_dir / "screenshot.png").write_bytes(png)
-    (snap_dir / "qr.json").write_text(json.dumps(decode_qr(png)))
+        title = ""
 
     snapshot = PageSnapshot(
         snapshot_id=snapshot_id,
         stage=stage,
         url=page.url,
-        title=await page.title(),
+        title=title,
         taken_at=datetime.now(UTC),
         html_path=rel("page.html"),
         visible_text=text[:2000],
         a11y_tree_path=rel("aria.yaml"),
-        screenshot_path=rel("screenshot.png"),
+        screenshot_path=rel("screenshot.png") if png else "",  # "" = no image captured
         network=await recorder.take_new(),
         image_paths=[],
     )

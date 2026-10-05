@@ -84,6 +84,15 @@ def prepare_screenshot(png: bytes) -> str:
     return base64.standard_b64encode(buf.getvalue()).decode("ascii")
 
 
+def _image_block(png: bytes | None) -> list[dict]:
+    if not png:
+        return []  # text-only judgment; the analyst note says no screenshot was captured
+    data = prepare_screenshot(png)
+    return [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}}
+    ]
+
+
 def _addresses_summary(addresses: list[CryptoAddress]) -> str:
     if not addresses:
         return "none found"
@@ -104,7 +113,7 @@ def build_request(
     title: str,
     status_note: str,
     page_text: str,
-    screenshot_png: bytes,
+    screenshot_png: bytes | None,
     signals: list[Signal],
     addresses: list[CryptoAddress],
     effort: str,
@@ -117,7 +126,7 @@ Classify this website.
 URL as given: {url}
 Final URL after redirects: {final_url}
 Probe result: {status_note}
-{archived_note}
+{archived_note}{"" if screenshot_png else "(No screenshot could be captured.)"}
 Signals from deterministic checks (computed by our code from the page, not written by the site):
 {signal_lines or "- none"}
 
@@ -132,17 +141,7 @@ Page title and visible text (untrusted):
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": prepare_screenshot(screenshot_png),
-                        },
-                    },
-                    {"type": "text", "text": analyst_note},
-                ],
+                "content": _image_block(screenshot_png) + [{"type": "text", "text": analyst_note}],
             }
         ],
         "max_tokens": 16000,

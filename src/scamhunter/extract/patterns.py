@@ -77,6 +77,20 @@ def find_candidates(text: str, by_lines: bool = False) -> list[Match]:
     return matches
 
 
+# JSON / JS object keys around a value: `"contract_address":"0x…"`, `approve_address:{TRX:"T…"}`.
+_IMMEDIATE_KEY = re.compile(r"""["']?([A-Za-z_][\w-]*)["']?\s*[:=]\s*["'][^"'\n]{0,200}$""")
+_ENCLOSING_KEY = re.compile(r"""["']?([A-Za-z_][\w-]*)["']?\s*:\s*[\[{][^\[\]{}]{0,400}$""")
+
+
+def json_keys(text: str, start: int) -> tuple[str, str]:
+    """(key whose string value contains the match, key of the enclosing object/array);
+    "" where there is none. Lets the extractor read structure instead of nearby words."""
+    before = text[max(0, start - 600) : start]
+    immediate = m.group(1) if (m := _IMMEDIATE_KEY.search(before)) else ""
+    enclosing = m.group(1) if (m := _ENCLOSING_KEY.search(before)) else ""
+    return immediate, enclosing
+
+
 # Payment URIs in hrefs and QR codes: "bitcoin:ADDR?amount=1", "ethereum:0x…@1".
 _URI = re.compile(r"^(?:bitcoin|ethereum|tron|litecoin|dogecoin|solana|ripple|xrp):", re.I)
 

@@ -115,6 +115,7 @@ scam-website-detector-agent/
 │   │
 │   ├── browser/
 │   │   ├── sandbox.py           # browser launch, hardened context, routing rules
+│   │   ├── wayback.py           # Wayback CDX lookup + usable-snapshot choice (dead-site policy step 1)
 │   │   ├── capture.py           # DOM, accessibility tree, screenshot, network log, Playwright trace
 │   │   ├── page_state.py        # compact page representation for the LLM
 │   │   ├── elements.py          # ElementProvider: list_elements() / perform() — Playwright impl, Stagehand-swappable
@@ -218,7 +219,7 @@ make selftest                                # proves egress rules work before a
 make run ARGS="--resume runs/2026-10-04T10-00"
 make rescore RUN=runs/2026-10-04T10-00       # re-classify from saved evidence; no site visits
 make eval                                    # compare against eval/labels.csv
-make report                                  # rebuild output/results.json + screenshots
+make report RUN=runs/2026-10-04T10-00        # publish a run's results into output/ (runs write to runs/<id>/output/)
 make test                                    # offline tests incl. mock exchange
 ```
 
@@ -718,7 +719,7 @@ The example below is illustrative, not a real finding (`TXyz…` is a placeholde
 
 **Flattening sightings.** `address_details[].source`, `stage` and `screenshot` come from one primary sighting: the earliest `deposit_page` sighting if there is one, otherwise the earliest sighting overall. `sighting_count` gives the total.
 
-**Address tiers.** A checksum-valid address is **primary** if it appears in a deposit or payment context: on a deposit page or after login, in a network response that also names a coin or network, in a wallet-mock transaction request, or beside a deposit/pay/send label in the page text. Otherwise it is **low confidence** (for example, found only in a script bundle, or lowercase EVM with no context). Blocklisted addresses (token contracts, zero/burn, examples) are never reported. Addresses found on `not_scam` sites go in `other_addresses`, outside the output lists.
+**Address tiers.** A checksum-valid address is **primary** if it appears in a deposit or payment context: on a deposit page or after login, in a network response whose JSON key (or enclosing object's key) is a payment/spender key (`deposit…`, `recharge…`, `approve…`, `spender`, `receive…`, `wallet…`, `address`) or that names coin + network, in a QR code, in a wallet-mock transaction request, or beside a deposit/pay/send label on its own line or the lines just above it in the page text. Values under contract/token keys (`contract_address`, `token_address`, `mint`) in API or script data are token contracts and are dropped (counted in a note); this was the pilot's main false-positive source. Otherwise it is **low confidence** (for example, found only in a script bundle, or lowercase EVM with no context). Blocklisted addresses (token contracts, zero/burn, examples) are never reported. Addresses found on `not_scam` sites go in `other_addresses`, outside the output lists.
 
 **Strings are reported as seen.** If a site shows an EVM address in lowercase, `address` is that lowercase string; `normalized` carries the checksummed form. Exact-string comparison then works, and case-insensitive comparison does too.
 
@@ -948,7 +949,8 @@ For each page state, `capture.py` produces a `PageSnapshot`:
 1. **Before navigation:** register a response listener (saves text bodies under a size cap) and inject `wallet_mock.js` via `add_init_script`, so it runs in every frame before the site's code.
 2. **After load:** wait for network idle (bounded), dismiss obvious overlays, then save HTML, visible text, accessibility tree, full-page screenshot, and image URLs.
 3. **Viewport choice:** mobile viewport + mobile user agent if the URL matches `mobile_hint_patterns` or the desktop render is an empty SPA shell; otherwise desktop.
-4. **Tracing:** for sites that end up classified as scam, or that fail, keep a Playwright trace (`context.tracing`, saved as `trace.zip`). It opens in Playwright's Trace Viewer with a step-by-step timeline, DOM snapshots, screenshots, and network requests including response bodies. Clean sites discard theirs to save disk. This gives reviewers replayable evidence locally, the same thing Browserbase's cloud session recordings would offer, without sending traffic through a third party.
+4. **Robust snapshots:** each artifact is saved independently. Playwright's screenshot waits for web fonts, which hang on many scam pages (6 of 18 pilot sites), so it falls back to CDP `Page.captureScreenshot`; a snapshot without an image is still recorded and the judge then gets text only. Highlight screenshots are only taken when the address is actually visible in the viewport (not in a hidden panel).
+5. **Tracing:** for sites that end up classified as scam, or that fail, keep a Playwright trace (`context.tracing`, saved as `trace.zip`). It opens in Playwright's Trace Viewer with a step-by-step timeline, DOM snapshots, screenshots, and network requests including response bodies. Clean sites discard theirs to save disk. This gives reviewers replayable evidence locally, the same thing Browserbase's cloud session recordings would offer, without sending traffic through a third party.
 
 **The mock wallet:** `wallet_mock.js` defines `window.ethereum` with `isMetaMask: true`. It answers `eth_requestAccounts` with a dummy account and records every `eth_sendTransaction` / `eth_signTypedData` / `approve` request instead of signing. A drainer's request reveals the attacker's recipient or spender address, which becomes a sighting with source `wallet_mock`. Nothing is ever signed, because there's no key.
 

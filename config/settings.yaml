@@ -41,7 +41,7 @@ features:
   wallet_mock: true
   qr_decode: true
   ocr: false
-  archive_fallback: false
+  archive_fallback: true            # Wayback recovery for non-live sites (§5.2a)
 identity:
   email_provider: "<disposable provider>"   # pick one that works; never a real/personal address
   on_email_rejected: record_blocked_at        # blocked_at: email_verification

@@ -80,22 +80,22 @@ Adjust the hours to the real schedule.
 
 ### M2. Thin end-to-end
 
-- [ ] Load URLs without lossy dedupe (paths are significant)
-- [ ] `capture.py`: final URL, status, title, visible text, HTML, accessibility tree, screenshot, **network responses**
-- [ ] Mobile viewport + user agent for `h5.`/`m.`/`/wap`/`/h5` and empty SPA shells
-- [ ] Address candidates from all sources; chain-specific checksum validators; contract/example blocklist
-- [ ] Asset/network **labels list** with confidence from nearby context
-- [ ] Normalize + dedupe addresses (format-aware keys)
-- [ ] Screenshot with the address highlighted **at the moment of discovery**
-- [ ] Classifier v1: signals + LLM judge with quoted evidence
-- [ ] Structured record per site even on timeout/error (`processing_status`)
-- [ ] Output contract (DESIGN §3): `is_scam`, `crypto_addresses` (primary), `low_confidence_addresses`, `address_details`; address tiers PRIMARY / LOW_CONFIDENCE
-- [ ] Model split: strong model for navigation and judging, `helper_model` (Haiku-class) for cheap helper calls; measure on the first 10 sites before fixing it
-- [ ] `make rescore`: rebuild classifications and `results.json` from saved evidence, no site visits
-- [ ] Unit tests for validators and extractor on fixture pages
-- [ ] Retry `tls_error` and `timeout` sites (incl. #112 ReadTimeout) once in Chromium before treating them as dead
-- [ ] Cloudflare phishing interstitials (#009, #035): verdict scam; try one click through the warning to capture the real page
-- [ ] Wayback recovery for non-live sites (DESIGN §5.2a), **time-boxed to 2h**; else signals-only rule
+- [x] Load URLs without lossy dedupe (paths are significant)
+- [x] `capture.py`: final URL, status, title, visible text, HTML, accessibility tree, screenshot, **network responses**
+- [x] Mobile viewport + user agent for `h5.`/`m.`/`/wap`/`/h5` and empty SPA shells
+- [x] Address candidates from all sources; chain-specific checksum validators; contract/example blocklist
+- [x] Asset/network **labels list** with confidence from nearby context
+- [x] Normalize + dedupe addresses (format-aware keys)
+- [x] Screenshot with the address highlighted **at the moment of discovery**
+- [x] Classifier v1: signals + LLM judge with quoted evidence
+- [x] Structured record per site even on timeout/error (`processing_status`)
+- [x] Output contract (DESIGN §3): `is_scam`, `crypto_addresses` (primary), `low_confidence_addresses`, `address_details`; address tiers PRIMARY / LOW_CONFIDENCE
+- [x] Model split: strong model for navigation and judging, `helper_model` (Haiku-class) for cheap helper calls; measure on the first 10 sites before fixing it
+- [x] `make rescore`: rebuild classifications and `results.json` from saved evidence, no site visits
+- [x] Unit tests for validators and extractor on fixture pages
+- [x] Retry `tls_error` and `timeout` sites (incl. #112 ReadTimeout) once in Chromium before treating them as dead
+- [x] Cloudflare phishing interstitials (#009, #035): verdict scam; try one click through the warning to capture the real page
+- [x] Wayback recovery for non-live sites (DESIGN §5.2a), **time-boxed to 2h**; else signals-only rule
 
 ### M3. Navigation agent
 

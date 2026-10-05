@@ -13,7 +13,7 @@ from scamhunter.extract.context import (
     mentions_solana,
     merge_labels,
 )
-from scamhunter.extract.patterns import find_candidates, strip_payment_uri
+from scamhunter.extract.patterns import find_candidates, json_keys, strip_payment_uri
 from scamhunter.extract.validators import validate
 from scamhunter.models import (
     AddressFormat,
@@ -27,6 +27,14 @@ from scamhunter.models import (
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.S | re.I)
 _TAG = re.compile(r"<[a-z][^>]*>", re.I)
 _SNIPPET_CHARS = 400
+
+# Keys whose value is a token/contract address: never a scammer's wallet (pilot: coin-list APIs).
+CONTRACT_KEY = re.compile(r"contract|token_?addr|^mint$|^token$", re.I)
+# Keys whose value is where money or approvals go (pilot: "approve_address": spender wallets).
+PAYMENT_KEY = re.compile(
+    r"approv|spender|deposit|recharge|receiv|collect|wallet|pay|addr|^to$|address", re.I
+)
+_STRUCTURED_SOURCES = {AddressSource.NETWORK_RESPONSE, AddressSource.SCRIPT}
 
 # Reaching these stages means the site showed the address to a (registered) user (§3.4 tiers).
 _PAYMENT_STAGES = {DiscoveryStage.AUTHENTICATED, DiscoveryStage.DEPOSIT_PAGE}
@@ -88,6 +96,7 @@ class _Accepted:
     verifiable: bool
     context: str
     near: str
+    keys: tuple[str, str]  # (immediate JSON key, enclosing object key)
 
 
 def _accept(text: str, blocklist: frozenset[str], by_lines: bool) -> Iterator[_Accepted]:
@@ -112,6 +121,7 @@ def _accept(text: str, blocklist: frozenset[str], by_lines: bool) -> Iterator[_A
             result.verifiable,
             match.context,
             match.near,
+            json_keys(text, match.start),
         )
 
 
@@ -119,24 +129,45 @@ def _dedupe_key(fmt: AddressFormat, normalized: str) -> str:
     return normalized.lower() if fmt == AddressFormat.EVM else normalized
 
 
-def extract(content: SnapshotContent, blocklist: frozenset[str]) -> list[CryptoAddress]:
-    """All validated addresses in one snapshot, one CryptoAddress per address."""
+def extract(
+    content: SnapshotContent, blocklist: frozenset[str], ignored: list[str] | None = None
+) -> list[CryptoAddress]:
+    """All validated addresses in one snapshot, one CryptoAddress per address.
+    Token-contract values in structured sources are skipped and appended to `ignored`."""
     page_coins = coins_in(content.visible_text)
     found: dict[str, CryptoAddress] = {}
     for source, text in _sources(content):
         if content.archived:
             source = AddressSource.ARCHIVE
         for acc in _accept(text, blocklist, by_lines=source == AddressSource.DOM_TEXT):
-            labels = label(acc.fmt, acc.near, page_coins)
-            payment = (
-                content.stage in _PAYMENT_STAGES
-                or source in (AddressSource.QR_CODE, AddressSource.WALLET_MOCK)
-                or (source != AddressSource.SCRIPT and has_payment_context(acc.near))
-                or (
-                    source == AddressSource.NETWORK_RESPONSE
-                    and any(lab.confidence >= 0.9 for lab in labels)
-                )
+            structured = source in _STRUCTURED_SOURCES or (
+                content.archived and acc.keys != ("", "")
             )
+            immediate, enclosing = acc.keys
+            if structured and (CONTRACT_KEY.search(immediate) or CONTRACT_KEY.search(enclosing)):
+                if ignored is not None:
+                    ignored.append(acc.normalized)
+                continue
+            # In JSON/JS the key names (e.g. approve_address → "TRX") label the address.
+            near = f"{enclosing} {immediate} {acc.near}" if structured else acc.near
+            labels = label(acc.fmt, near, page_coins)
+            if structured:
+                # Scripts stay low-confidence unless the stage says otherwise (DESIGN §3.4);
+                # API responses count as payment context when the key says so.
+                api = source == AddressSource.NETWORK_RESPONSE or content.archived
+                payment = content.stage in _PAYMENT_STAGES or (
+                    api
+                    and (
+                        bool(PAYMENT_KEY.search(immediate) or PAYMENT_KEY.search(enclosing))
+                        or any(lab.confidence >= 0.9 for lab in labels)
+                    )
+                )
+            else:
+                payment = (
+                    content.stage in _PAYMENT_STAGES
+                    or source in (AddressSource.QR_CODE, AddressSource.WALLET_MOCK)
+                    or has_payment_context(acc.near)
+                )
             address = CryptoAddress(
                 address=acc.raw,
                 normalized=acc.normalized,

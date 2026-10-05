@@ -92,3 +92,12 @@ def test_require_egress_proxy_refuses_outside_container(monkeypatch) -> None:
     monkeypatch.setenv("EGRESS_PROXY", "http://egress-proxy:3128")
     with pytest.raises(SandboxError):  # still no /.dockerenv on the host
         require_egress_proxy()
+
+
+def test_settings_match_design() -> None:
+    """config/settings.yaml must equal the block in DESIGN §3.5 (drift guard: a feature flag
+    flipped only in the doc once silently disabled Wayback recovery)."""
+    design = (REPO_ROOT / "docs" / "DESIGN.md").read_text()
+    section = design[design.index("**`config/settings.yaml`**") :]
+    block = re.search(r"```yaml\n(.*?)```", section, re.S).group(1)
+    assert yaml.safe_load(block) == yaml.safe_load((REPO_ROOT / "config/settings.yaml").read_text())
