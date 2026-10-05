@@ -22,14 +22,16 @@ class TokenUsage:
     cached_calls: int = 0
 
     def add(self, usage: dict[str, int], cached: bool) -> None:
+        self.llm_calls += 1
+        if cached:  # answered from the gateway's response cache: no tokens spent
+            self.cached_calls += 1
+            return
         self.tokens_in += (
             usage.get("input_tokens", 0)
             + usage.get("cache_read_input_tokens", 0)
             + usage.get("cache_creation_input_tokens", 0)
         )
         self.tokens_out += usage.get("output_tokens", 0)
-        self.llm_calls += 1
-        self.cached_calls += int(cached)
 
     def as_dict(self) -> dict[str, int]:
         return {

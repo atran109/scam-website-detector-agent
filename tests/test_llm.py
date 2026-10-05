@@ -112,3 +112,18 @@ def test_parse_judgment() -> None:
     assert j.probability_scam == 1.0 and j.impersonated_brand is None
     with pytest.raises(LLMError):
         parse_judgment(LLMResponse("not json", "end_turn", "m", False))
+
+
+def test_cached_calls_cost_no_tokens() -> None:
+    from scamhunter.llm.client import TokenUsage
+
+    usage = TokenUsage()
+    u = {"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 10}
+    usage.add(u, cached=False)
+    usage.add(u, cached=True)
+    assert usage.as_dict() == {
+        "tokens_in": 110,
+        "tokens_out": 50,
+        "llm_calls": 2,
+        "cached_calls": 1,
+    }
