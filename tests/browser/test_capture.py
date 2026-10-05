@@ -3,7 +3,6 @@ container (`make test-browser`, network_mode: none), never on the host."""
 
 import asyncio
 import functools
-import io
 import json
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
