@@ -28,6 +28,22 @@ _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.S | re.I)
 _TAG = re.compile(r"<[a-z][^>]*>", re.I)
 _SNIPPET_CHARS = 400
 
+# The page itself calls the address a contract: "Contract Address: 0x…", "Token address:",
+# "Smart contract (BEP-20):". Anchored to the end of the text right before the address.
+CONTRACT_LABEL = re.compile(
+    r"(?:\b(?:token|smart|nft|presale|sale)?\s*contract(?:\s+address)?|\btoken\s+address"
+    r"|合约(?:地址)?)\s*(?:\([^)]{0,24}\))?\s*[:：\-–]?\s*$",
+    re.I,
+)
+# Unless the same text tells visitors to send funds there: a presale/payment contract can be
+# exactly the scammer's collection address.
+SEND_TO = re.compile(r"\b(?:send|pay|transfer|deposit|invest)\b[^.\n]{0,40}\bto\b", re.I)
+
+
+def labelled_contract(label_line: str) -> bool:
+    return bool(CONTRACT_LABEL.search(label_line)) and not SEND_TO.search(label_line)
+
+
 # Keys whose value is a token/contract address: never a scammer's wallet (pilot: coin-list APIs).
 CONTRACT_KEY = re.compile(r"contract|token_?addr|^mint$|^token$", re.I)
 # Keys whose value is where money or approvals go (pilot: "approve_address": spender wallets).
@@ -97,6 +113,7 @@ class _Accepted:
     context: str
     near: str
     keys: tuple[str, str]  # (immediate JSON key, enclosing object key)
+    label_line: str = ""
 
 
 def _accept(text: str, blocklist: frozenset[str], by_lines: bool) -> Iterator[_Accepted]:
@@ -122,6 +139,7 @@ def _accept(text: str, blocklist: frozenset[str], by_lines: bool) -> Iterator[_A
             match.context,
             match.near,
             json_keys(text, match.start),
+            match.label_line,
         )
 
 
@@ -133,61 +151,78 @@ def extract(
     content: SnapshotContent, blocklist: frozenset[str], ignored: list[str] | None = None
 ) -> list[CryptoAddress]:
     """All validated addresses in one snapshot, one CryptoAddress per address.
-    Token-contract values in structured sources are skipped and appended to `ignored`."""
+    Token contracts (under contract keys in API/script data, or labelled "contract" in the
+    visible text) are skipped and appended to `ignored`."""
     page_coins = coins_in(content.visible_text)
     found: dict[str, CryptoAddress] = {}
+
+    # Pass 1: every validated address in every source, and which ones are token contracts.
+    # A contract is decided once per address: if the page labels it a contract in one place,
+    # the same address in an attribute or script ("Copy" buttons, JSON config) is one too.
+    candidates: list[tuple[AddressSource, _Accepted]] = []
+    contracts: set[str] = set()
     for source, text in _sources(content):
         if content.archived:
             source = AddressSource.ARCHIVE
         for acc in _accept(text, blocklist, by_lines=source == AddressSource.DOM_TEXT):
+            candidates.append((source, acc))
             structured = source in _STRUCTURED_SOURCES or (
                 content.archived and acc.keys != ("", "")
             )
             immediate, enclosing = acc.keys
-            if structured and (CONTRACT_KEY.search(immediate) or CONTRACT_KEY.search(enclosing)):
-                if ignored is not None:
-                    ignored.append(acc.normalized)
-                continue
-            # In JSON/JS the key names (e.g. approve_address → "TRX") label the address.
-            near = f"{enclosing} {immediate} {acc.near}" if structured else acc.near
-            labels = label(acc.fmt, near, page_coins)
-            if structured:
-                # Scripts stay low-confidence unless the stage says otherwise (DESIGN §3.4);
-                # API responses count as payment context when the key says so.
-                api = source == AddressSource.NETWORK_RESPONSE or content.archived
-                payment = content.stage in _PAYMENT_STAGES or (
-                    api
-                    and (
-                        bool(PAYMENT_KEY.search(immediate) or PAYMENT_KEY.search(enclosing))
-                        or any(lab.confidence >= 0.9 for lab in labels)
-                    )
+            if (source == AddressSource.DOM_TEXT and labelled_contract(acc.label_line)) or (
+                structured and (CONTRACT_KEY.search(immediate) or CONTRACT_KEY.search(enclosing))
+            ):
+                contracts.add(_dedupe_key(acc.fmt, acc.normalized))
+
+    # Pass 2: build addresses, skipping contracts.
+    for source, acc in candidates:
+        if _dedupe_key(acc.fmt, acc.normalized) in contracts:
+            if ignored is not None and acc.normalized not in ignored:
+                ignored.append(acc.normalized)
+            continue
+        structured = source in _STRUCTURED_SOURCES or (content.archived and acc.keys != ("", ""))
+        immediate, enclosing = acc.keys
+        # In JSON/JS the key names (e.g. approve_address → "TRX") label the address.
+        near = f"{enclosing} {immediate} {acc.near}" if structured else acc.near
+        labels = label(acc.fmt, near, page_coins)
+        if structured:
+            # Scripts stay low-confidence unless the stage says otherwise (DESIGN §3.4);
+            # API responses count as payment context when the key says so.
+            api = source == AddressSource.NETWORK_RESPONSE or content.archived
+            payment = content.stage in _PAYMENT_STAGES or (
+                api
+                and (
+                    bool(PAYMENT_KEY.search(immediate) or PAYMENT_KEY.search(enclosing))
+                    or any(lab.confidence >= 0.9 for lab in labels)
                 )
-            else:
-                payment = (
-                    content.stage in _PAYMENT_STAGES
-                    or source in (AddressSource.QR_CODE, AddressSource.WALLET_MOCK)
-                    or has_payment_context(acc.near)
-                )
-            address = CryptoAddress(
-                address=acc.raw,
-                normalized=acc.normalized,
-                tier=AddressTier.PRIMARY if payment else AddressTier.LOW_CONFIDENCE,
-                format=acc.fmt,
-                checksum_valid=True,
-                checksum_verifiable=acc.verifiable,
-                labels=labels,
-                sightings=[
-                    Sighting(
-                        source=source,
-                        stage=content.stage,
-                        page_url=content.page_url,
-                        context_snippet=acc.context[:_SNIPPET_CHARS],
-                    )
-                ],
-                first_seen_stage=content.stage,
             )
-            key = _dedupe_key(acc.fmt, acc.normalized)
-            found[key] = merge_address(found[key], address) if key in found else address
+        else:
+            payment = (
+                content.stage in _PAYMENT_STAGES
+                or source in (AddressSource.QR_CODE, AddressSource.WALLET_MOCK)
+                or has_payment_context(acc.near)
+            )
+        address = CryptoAddress(
+            address=acc.raw,
+            normalized=acc.normalized,
+            tier=AddressTier.PRIMARY if payment else AddressTier.LOW_CONFIDENCE,
+            format=acc.fmt,
+            checksum_valid=True,
+            checksum_verifiable=acc.verifiable,
+            labels=labels,
+            sightings=[
+                Sighting(
+                    source=source,
+                    stage=content.stage,
+                    page_url=content.page_url,
+                    context_snippet=acc.context[:_SNIPPET_CHARS],
+                )
+            ],
+            first_seen_stage=content.stage,
+        )
+        key = _dedupe_key(acc.fmt, acc.normalized)
+        found[key] = merge_address(found[key], address) if key in found else address
     return list(found.values())
 
 

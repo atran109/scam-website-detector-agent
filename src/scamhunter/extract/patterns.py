@@ -41,6 +41,7 @@ class Match:
     start: int
     context: str  # wide window for evidence snippets, whitespace collapsed
     near: str  # tight context used to label the address and decide payment context
+    label_line: str = ""  # visible text only: what the page puts right before the address
 
 
 def _collapse(text: str) -> str:
@@ -62,6 +63,18 @@ def _near(text: str, start: int, end: int, by_lines: bool) -> str:
     return _collapse(text[line_start : line_end if line_end >= 0 else len(text)])
 
 
+def _label_line(text: str, start: int) -> str:
+    """Text on the address's own line before it; if the address starts its line, the nearest
+    non-empty line above ("Contract Address:⏎0x…" lays out both ways)."""
+    line_start = text.rfind("\n", 0, start) + 1
+    prefix = text[line_start:start].strip()
+    while not prefix and line_start > 0:
+        prev_start = text.rfind("\n", 0, line_start - 1) + 1
+        prefix = text[prev_start : line_start - 1].strip()
+        line_start = prev_start
+    return prefix[-120:]
+
+
 def find_candidates(text: str, by_lines: bool = False) -> list[Match]:
     """Every regex match of every format. One string may match several formats;
     the extractor keeps whichever one validates (checksummed formats win over SOL).
@@ -73,7 +86,8 @@ def find_candidates(text: str, by_lines: bool = False) -> list[Match]:
         for m in pattern.finditer(text):
             window = text[max(0, m.start() - CONTEXT_CHARS) : m.end() + CONTEXT_CHARS]
             near = _near(text, m.start(), m.end(), by_lines)
-            matches.append(Match(m.group(), fmt, m.start(), _collapse(window), near))
+            label_line = _label_line(text, m.start()) if by_lines else ""
+            matches.append(Match(m.group(), fmt, m.start(), _collapse(window), near, label_line))
     return matches
 
 

@@ -390,7 +390,10 @@ async def analyze(
         )
     addresses = _apply_highlights(addresses, ctx.site_dir(site), snapshots)
     if ignored:
-        notes.append(f"ignored {len(set(ignored))} token-contract address(es) in API/script data")
+        notes.append(
+            f"ignored {len(set(ignored))} token-contract address(es) "
+            f"(labelled contract on the page or under contract keys in API/script data)"
+        )
 
     # Judge the last snapshot: after a mobile retry or warning click-through, it's the real page.
     last = snapshots[-1]

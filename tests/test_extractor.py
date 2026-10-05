@@ -162,3 +162,61 @@ def test_json_keys_drop_contracts_and_promote_spenders() -> None:
     assert found[A["tron1"]].tier == AddressTier.PRIMARY
     assert found[A["evm_lower"]].tier == AddressTier.PRIMARY
     assert any(lab.asset == Asset.TRX for lab in found[A["tron1"]].labels)
+
+
+PILOT = Path(__file__).parent / "fixtures" / "pilot_texts"
+
+
+def test_027_labelled_contract_dropped_wallet_kept() -> None:
+    """Pilot #027: 'Wallet Address' → 0xD499… is the site's wallet; 'Contract Address: 0xe90D…'
+    is the project's own token contract (the page says so)."""
+    text = (PILOT / "027.txt").read_text()
+    ignored: list[str] = []
+    content = SnapshotContent("s1", DiscoveryStage.LANDING, "https://x.test/", "", text)
+    found = {a.address for a in extract(content, BLOCKLIST, ignored)}
+    assert found == {"0xD499F95a6605550161cB9725A79c569bD3482F21"}
+    assert ignored == ["0xe90D5F442D651E32E95f71Da0a39f22f4c5E0bD5"]
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        "Contract Address: {a}",
+        "Token address: {a}",
+        "Smart Contract (BEP-20): {a}",
+        "Token Contract\n{a}",  # label on the line above
+        "合约地址：{a}",
+    ],
+)
+def test_contract_label_layouts_are_dropped(layout: str) -> None:
+    ignored: list[str] = []
+    content = snapshot("<p></p>")
+    content.visible_text = layout.format(a=A["evm"])
+    assert extract(content, BLOCKLIST, ignored) == [] and ignored == [A["evm"]]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Wallet Address\n{a}",  # not a contract label
+        "Deposit address: {a}",
+        "Send ETH to the presale contract: {a}",  # told to send funds there: could be theirs
+        "Contract trading deposit address: {a}",
+    ],
+)
+def test_other_labels_keep_the_address(line: str) -> None:
+    content = snapshot("<p></p>")
+    content.visible_text = line.format(a=A["evm"])
+    assert [a.address for a in extract(content, BLOCKLIST)] == [A["evm"]]
+
+
+def test_contract_status_applies_across_sources() -> None:
+    """The page labels the address a contract in its text; the same address in a 'Copy' button
+    attribute (no label there) must not come back as a low-confidence address."""
+    html = (
+        f"<p>Contract Address: {A['evm']}</p>"
+        f'<button data-clipboard-text="{A["evm"]}">Copy Address</button>'
+    )
+    ignored: list[str] = []
+    assert extract(snapshot(html), BLOCKLIST, ignored) == []
+    assert ignored == [A["evm"]]  # reported once, not once per source
