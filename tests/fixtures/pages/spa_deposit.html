@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><title>Fixture SPA</title></head>
+<body>
+  <div id="app">Loading…</div>
+  <script>
+    // Like a scam SPA: the address only arrives in an API response after load.
+    fetch("/api/address.json").then(r => r.json()).then(d => {
+      document.getElementById("app").innerHTML =
+        "<h2>" + d.coin + " " + d.network + "</h2>" +
+        "<p>Deposit address</p><p class='addr'>" + d.address + "</p>" +
+        "<img src='/qr.png' width='200' height='200'>" +
+        "<a href='/popup.html' target='_blank' id='pop'>open</a>";
+    });
+  </script>
+</body></html>

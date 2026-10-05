@@ -1,5 +1,5 @@
 # Crawler image: Python 3.12 + Playwright Chromium, runs as a non-root user (DESIGN §5.6).
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3
+FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS base
 
 ARG PLAYWRIGHT_VERSION=1.63.0
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -30,3 +30,12 @@ RUN useradd --create-home --uid 10001 crawler \
 USER crawler
 
 CMD ["scamhunter", "--help"]
+
+# Offline browser tests (make test-browser): same image plus pytest and the tests.
+FROM base AS test
+USER root
+RUN pip install "pytest==9.1.1"
+COPY tests ./tests
+RUN chown -R crawler:crawler /app/tests
+USER crawler
+CMD ["pytest", "-q", "-m", "browser", "-p", "no:cacheprovider", "tests/browser"]

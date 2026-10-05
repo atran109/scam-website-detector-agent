@@ -9,7 +9,7 @@ RUN_ID ?= $(shell date +%Y-%m-%dT%H-%M-%S)
 ROUTER_IP ?= $(shell route -n get default 2>/dev/null | awk '/gateway:/{print $$2}')
 COMPOSE := RUN_ID=$(RUN_ID) SELFTEST_ROUTER_IP=$(ROUTER_IP) docker compose
 
-.PHONY: build selftest triage run rescore eval report test lint venv down
+.PHONY: build selftest triage run rescore eval report test test-browser lint venv down
 
 $(BIN)/python: pyproject.toml
 	$(PYTHON) -m venv $(VENV)
@@ -21,6 +21,10 @@ venv: $(BIN)/python
 
 test: venv
 	$(BIN)/pytest -q
+
+test-browser:
+	docker compose --profile test build browser-tests
+	docker compose --profile test run --rm browser-tests
 
 lint: venv
 	$(BIN)/ruff check src tests eval docker

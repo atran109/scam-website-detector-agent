@@ -14,7 +14,7 @@ services:
     cpus: 1
 
   crawler:
-    build: .
+    build: {context: ., target: base}
     networks: [internal]                          # internal only: no direct internet route
     depends_on: [egress-proxy]
     environment:
@@ -33,6 +33,19 @@ services:
     cpus: 4
     shm_size: 1g                                  # Chromium uses /dev/shm heavily
     init: true                                    # reap orphaned browser processes
+
+  browser-tests:                                  # offline Chromium tests: no network at all
+    profiles: [test]
+    build: {context: ., target: test}
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+      - "seccomp=docker/seccomp/chromium.json"
+    mem_limit: 2g
+    pids_limit: 512
+    shm_size: 1g
+    init: true
 
 networks:
   internal:

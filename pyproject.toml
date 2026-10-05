@@ -37,6 +37,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["browser: needs Chromium; runs only in the browser-tests container (make test-browser)"]
+addopts = "-m 'not browser'"
 
 [tool.ruff]
 line-length = 100
