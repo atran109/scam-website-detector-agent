@@ -304,3 +304,19 @@ Heuristic p_h (before → after) and final p; "before" is the original `checkpoi
 | 004 | 0.27→0.27 | 0.17→0.55 | **not_scam→scam** | now `parked`; dead-site rule leans scam on .cloud TLD + invalid cert alone |
 
 All other 11 sites unchanged. Verdicts 13/5 → 14/4; the one flip (#004) is a calibration case for M4, not a detector win: a parked domain with only weak signals gets 0.55. Still low heuristic scores on #055, #057, #100, #128 (their text isn't covered); the LLM carries them.
+
+## 2026-10-05 06:00 · H+? · FINDING: how much of the dead-site verdict rests on weak signals (rule unchanged)
+Computed from `runs/triage-1/triage.jsonl` with current code, no visits: 104 of 160 sites not live (53 dns_failure, 23 http_error, 14 tls_error, 10 timeout, 3 suspended, 1 empty). Under the current signals-only rule:
+- 74 get `scam` (2 by the Cloudflare phishing-warning hard rule, 11 on a moderate signal such as brand-in-domain/typosquat/free hosting/hosting suspended, **61 on weak signals only**), and 30 have no positive signal and get `not_scam` 0.4.
+- Weak-only sites by number of weak signals: 36 have one, 19 two, 5 three, 1 four. The signals are mostly `finance_terms_in_domain` (32), `random_looking_domain` (21) and cheap TLDs (~40 across many TLDs); `invalid_tls_cert` only once.
+- **(a) require ≥1 moderate signal:** all 61 weak-only sites flip scam → not_scam; 13 of 104 stay scam (91 end not_scam).
+- **(b) weak-only needs ≥3 weak signals** (anything with a moderate or stronger signal still leans scam): 55 flip (36 + 19); 19 of 104 stay scam, of which 6 are weak-only.
+Caveats: this is an upper bound for the signals-only population. 24 tls_error/timeout sites get a Chromium retry first, Wayback may supply content for some (e.g. #001 resolved to a real page), and the sibling pass adds scam verdicts back for siblings of live scams. The rule is NOT changed; the decision and a re-count after those steps are on the M4 list. One thing the numbers say regardless of choice: 82% of dead-site scam verdicts today rest on weak evidence alone.
+
+## 2026-10-05 06:00 · H+? · FINDING: the 30 domains flagged `random_looking_domain`
+Digits (10): datahydru602, small1006, fxo2o, gete84, lon28, 3455n, openai9315, r7t2mj, usdc022, usdc661. Almost no vowels (8): gxecgcx, twfxcc, blsyqsz, btcctw, ceffknks, usdcsyh, yqeydfhr, xtbcopy. Letter pairs (12): bqpxaf, byexdd, bitxex, nexcofxs, twatfx, coinexvto, coinruq, feyru, goodcmvip, rexiqok, twxauxjpfivt, zfxfa. The letter-pair table is English-only, so a non-English word or a pinyin-initials abbreviation (plausible for usdcsyh, blsyqsz, zfxfa, goodcmvip) could be flagged; unverified without a native reader. The user is checking the list by eye; M4 item added.
+
+## 2026-10-05 06:00 · TODO-LATER: M4 additions
+- **Mobile exchange template signal.** Menu cluster (Recharge/Withdraw/Finance/Loan/Service/Contract/Assets/Team/Chat Room/"AI Quant"/"Follow") plus a forced Connect Wallet modal. Saved pilot texts: #100 matches 9 of 12 words, #057 six, #055 only Connect Wallet (plus Contract/Follow), #128 none (it is a shop); #027 (token project) shares generic words (Contract, Follow, Team, Assets), so the rule must need a cluster of the distinctive words.
+- **Domain/content mismatch signal (e.g. #003).** Confirmed NOT done and, until now, not logged as deferred: DESIGN §5.4 lists "mismatched branding" among the planned signals but no code implements it. #003 (`addmklwhisky.com`, a Chinese immigration-service site) scored not_scam 0.23, so this is a real gap. Options in PLAN M4.
+- Signals-only rule decision (see FINDING above) and a re-count after rechecks, Wayback and the sibling pass.
