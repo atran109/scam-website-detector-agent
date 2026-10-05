@@ -9,7 +9,7 @@ RUN_ID ?= $(shell date +%Y-%m-%dT%H-%M-%S)
 ROUTER_IP ?= $(shell route -n get default 2>/dev/null | awk '/gateway:/{print $$2}')
 COMPOSE := RUN_ID=$(RUN_ID) SELFTEST_ROUTER_IP=$(ROUTER_IP) docker compose
 
-.PHONY: build selftest triage run rescore eval report test test-browser lint venv down
+.PHONY: review build selftest triage run rescore eval report test test-browser lint venv down
 
 $(BIN)/python: pyproject.toml
 	$(PYTHON) -m venv $(VENV)
@@ -55,6 +55,11 @@ rescore:
 
 eval:
 	@echo "make eval: not implemented (M4)"; exit 1
+
+# Read-only: builds runs/<id>/review/index.html from saved evidence. No containers, no network.
+review: venv
+	@test -n "$(RUN)" || (echo "usage: make review RUN=<run id>"; exit 1)
+	$(BIN)/scamhunter review --run-id $(notdir $(RUN))
 
 report:
 	@test -n "$(RUN)" || (echo "usage: make report RUN=runs/<id>"; exit 1)

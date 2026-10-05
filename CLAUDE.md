@@ -25,3 +25,4 @@ Crypto scam detection agent for the TRM Labs take-home. For each URL in `data/ur
 - `make selftest` — egress/isolation checks (must pass before real visits)
 - `make test` — unit tests
 - `make run` / `make rescore` — see DESIGN §2.4
+- `make review RUN=<id>` — read-only HTML review page + labels template from saved evidence (no containers); open `runs/<id>/review/index.html` only from that folder

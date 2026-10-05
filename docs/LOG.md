@@ -249,3 +249,9 @@ Open for later milestones:
 - Live re-visits give slightly different probabilities (dynamic pages → new LLM requests; e.g. 067 0.44 → 0.49). Rescore from saved evidence is reproducible (gateway cache).
 - Addresses hidden behind UI (027 "Show Notice") → M3 agent.
 - Possible M3/M4 signal: a token-approval spender in site config (approval drainer).
+
+## 2026-10-05 02:10 · H+? · DECISION: read-only review page (`make review`)
+`make review RUN=<id>` writes `runs/<id>/review/index.html`, `style.css` and `labels_template.csv` from `checkpoint.jsonl` and the saved screenshots: no containers, no network, no site visits. Cards are ordered borderline first (|probability − threshold| ≤ 0.15, closest first), then the rest by site id; I chose the 0.15 band since the request left "borderline" undefined.
+- **Safety:** static HTML; all page/LLM text escaped and stripped of control/bidi characters; truncated with an explicit marker; no `<script>`, iframes or external URLs; saved page HTML, traces and network bodies are never embedded or linked; only PNGs under the run's `sites/` folder are referenced, by relative path.
+- **CSP deviation:** the requested `default-src 'none'; img-src 'self'` blocks inline `<style>`, so the CSS is a sibling `style.css` and the policy adds `style-src 'self'`. Checked in Chromium from `file://`: all 15 screenshots of pilot-5 load, styles apply, no CSP violations.
+- `labels_template.csv` is for hand labeling (`my_label`, `my_notes` blank); it never touches `eval/labels.csv`, which stays a manual copy step.

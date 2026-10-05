@@ -18,6 +18,7 @@ from scamhunter.pipeline import (
     run_triage,
     status_counts,
 )
+from scamhunter.report.review import write_review
 from scamhunter.report.summary import summarize
 from scamhunter.report.writer import write_results
 from scamhunter.store import RUNS_DIR, new_run_id, run_dir
@@ -92,6 +93,19 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_review(args: argparse.Namespace) -> int:
+    """Read-only HTML review page + labels template from a run's saved evidence."""
+    run = RUNS_DIR / args.run_id
+    checkpoint = run / "checkpoint.jsonl"
+    if not checkpoint.exists():
+        print(f"no checkpoint at {checkpoint}")
+        return 1
+    results = list(load_checkpoint(checkpoint).values())
+    path = write_review(results, args.run_id, run, load_settings().classify.scam_threshold)
+    print(f"{path} ({len(results)} sites); labels template next to it")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="scamhunter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -113,10 +127,18 @@ def main(argv: list[str] | None = None) -> int:
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--run-id", required=True)
+    review = sub.add_parser("review", help="read-only HTML review page from saved evidence")
+    review.add_argument("--run-id", required=True)
     sub.add_parser("eval", help="not implemented yet (M4)")
 
     args = parser.parse_args(argv)
-    handlers = {"triage": cmd_triage, "run": cmd_run, "rescore": cmd_rescore, "report": cmd_report}
+    handlers = {
+        "triage": cmd_triage,
+        "run": cmd_run,
+        "rescore": cmd_rescore,
+        "report": cmd_report,
+        "review": cmd_review,
+    }
     if args.command in handlers:
         return handlers[args.command](args)
     print(f"{args.command}: not implemented")
