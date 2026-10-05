@@ -146,3 +146,72 @@ def test_dead_site_policy() -> None:
     )
     warned = score_without_content(cf, T, "Cloudflare warning page")
     assert warned.verdict == Verdict.SCAM and warned.scam_probability >= 0.85
+
+
+# ---------- random-looking domains ----------
+
+from scamhunter.classify.domain import random_domain_reason  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "usdc661.com",  # digits stuffed into a name (pilot #100)
+        "usdc022.com",
+        "3455n.top",  # pilot #067
+        "r7t2mj.xyz",
+        "fxo2o.me",
+        "datahydru602.com",
+        "openai9315.com",
+        "gete84.com",  # short name with a two-digit tail
+        "gxecgcx.com",  # consonant soup
+        "blsyqsz.com",
+        "ceffknks.vip",
+        "bqpxaf.xyz",  # letter pairs no English word uses
+        "twxauxjpfivt.com",
+        "zfxfa.vip",
+    ],
+)
+def test_random_looking_domains_flagged(domain: str) -> None:
+    assert random_domain_reason(domain)
+    found = [s for s in domain_signals(domain, domain, BRANDS) if s.name == "random_looking_domain"]
+    assert found and found[0].tier.value == "weak" and found[0].weight == 0.5
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "binance.com",
+        "coinbase.com",
+        "kraken.com",
+        "bitget.com",
+        "okx.com",
+        "keystonevaults.com",
+        "cryptotrackerapp.net",
+        "bradfordtradeins.com",
+        "copykoieliteglobal.org",
+        "vnexchange.me",
+        "dexapp.uk",
+        "sebca.art",
+        "claudetf.fun",
+        "22betcanada.com",  # leading digits, normal word after
+        "coinhako01.com",
+        "luminex3.net",  # a short digit tail on a real name
+        "bahrainiptv.com",
+        "metacapitalinvestment.pro",
+    ],
+)
+def test_ordinary_domains_not_flagged(domain: str) -> None:
+    assert random_domain_reason(domain) is None
+
+
+def test_pronounceable_made_up_names_are_a_known_miss() -> None:
+    """kisngaf/koserwry score like real names (bitget, claudetf) in a letter-pair model, so
+    flagging them would also flag real ones; the rule is deliberately conservative."""
+    for domain in ("kisngaf.shop", "koserwry.xyz", "proymsi.xyz", "busigirh.xyz"):
+        assert random_domain_reason(domain) is None
+
+
+def test_free_hosting_hosts_skip_the_random_check() -> None:
+    signals = domain_signals("ca7ggs-xj.myshopify.com", "myshopify.com", BRANDS)
+    assert "random_looking_domain" not in names(signals) and "free_hosting" in names(signals)

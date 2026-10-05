@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 
+from scamhunter.classify.bigrams import COLS, LOGP, ROWS
 from scamhunter.config import REPO_ROOT
 from scamhunter.models import Signal, SignalTier
 
@@ -108,10 +109,53 @@ def brand_signal(label: str, brands: list[str]) -> Signal | None:
     return None
 
 
+BIGRAM_THRESHOLD = -3.9  # mean ln P(letter pair) below this: letters no English word uses
+MIN_ALPHA_FOR_BIGRAMS = 5
+MAX_VOWEL_RATIO = 0.15  # consonant soup ("gxecgcx", "ceffknks")
+MIN_LEN_FOR_VOWELS = 6
+
+
+def _bigram_score(letters: str) -> float:
+    padded = "^" + letters + "$"
+    total = 0.0
+    for a, b in zip(padded, padded[1:], strict=False):
+        total += LOGP[ROWS.index(a)][COLS.index(b)]
+    return total / (len(padded) - 1)
+
+
+def random_domain_reason(registrable_domain: str) -> str | None:
+    """Why the domain label looks machine-generated, or None. Deliberately conservative: it
+    flags digits mixed into letters and clear letter-pair outliers. Pronounceable made-up names
+    ("kisngaf") score like real brands ("bitget", "claudetf") and are NOT caught."""
+    label = registrable_domain.lower().split(".")[0]
+    if not label:
+        return None
+    # digits mixed into letters: usdc661, 3455n, r7t2mj, openai9315; short two-digit tails
+    # (gete84, lon28) too, but not "22betcanada" or "coinhako01"
+    if re.search(r"[a-z]\d[a-z]", label) or re.search(r"[a-z]\d{3,}|\d{3,}[a-z]", label):
+        return "digits mixed into the name"
+    if re.fullmatch(r"\d{3,}", label):
+        return "digits only"
+    if re.search(r"[a-z]", label) and re.search(r"\d{2}", label) and len(label) <= 7:
+        return "short name with digits"
+    for part in label.split("-"):
+        letters = re.sub(r"[^a-z]", "", part)
+        if len(letters) >= MIN_LEN_FOR_VOWELS:
+            vowels = sum(c in "aeiou" for c in letters) / len(letters)
+            if vowels <= MAX_VOWEL_RATIO:
+                return f'"{part}" has almost no vowels'
+        if len(letters) >= MIN_ALPHA_FOR_BIGRAMS:
+            score = _bigram_score(letters)
+            if score < BIGRAM_THRESHOLD:
+                return f'"{part}" has letter pairs no English word uses ({score:.1f})'
+    return None
+
+
 def domain_signals(host: str, registrable_domain: str, brands: list[str]) -> list[Signal]:
     signals: list[Signal] = []
     label, _, tld = registrable_domain.partition(".")
-    if any(host == h or host.endswith("." + h) for h in FREE_HOSTING):
+    free_hosting = any(host == h or host.endswith("." + h) for h in FREE_HOSTING)
+    if free_hosting:
         signals.append(
             Signal(
                 name="free_hosting",
@@ -140,6 +184,16 @@ def domain_signals(host: str, registrable_domain: str, brands: list[str]) -> lis
                 tier=SignalTier.WEAK,
                 weight=0.5,
                 evidence=f'"{m.group()}" in {host}',
+                source="domain",
+            )
+        )
+    if not free_hosting and (why := random_domain_reason(registrable_domain)):
+        signals.append(
+            Signal(
+                name="random_looking_domain",
+                tier=SignalTier.WEAK,
+                weight=0.5,
+                evidence=f"{registrable_domain}: {why}",
                 source="domain",
             )
         )

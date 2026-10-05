@@ -281,3 +281,26 @@ Tests use the saved pilot texts (copied to `tests/fixtures/pilot_texts/`, since 
 - **Exception I added:** a label line that tells visitors to send funds there ("Send ETH to the presale contract: 0x…", "invest … to") is kept. A presale/payment contract can be the scammer's collection address, which is exactly what TRM wants. Easy to remove if you'd rather drop every "contract" label.
 - Not covered: a contract that the page never labels as such (e.g. only named in a prose sentence), and a snapshot-to-snapshot case (labelled in one snapshot, bare in another); with one snapshot per site today this doesn't occur.
 - **Result (rescore, no visits):** #027 reports only `0xD499…` (primary); low-confidence list is empty. #100 unchanged (2 primary approval wallets).
+
+## 2026-10-05 05:10 · H+? · DECISION: weak "random-looking domain" signal (fix 4 of 4)
+`random_looking_domain` (weak, weight 0.5, like the other weak domain signals; skipped for free-hosting hosts). Flags a registrable-domain label when it has:
+- digits mixed into letters: letter-digit-letter (`fxo2o`, `r7t2mj`), a run of 3+ digits next to letters (`usdc661`, `3455n`, `datahydru602`, `openai9315`), or a short name with a two-digit tail (`gete84`, `lon28`); not `22betcanada`, `coinhako01`, `luminex3`;
+- almost no vowels (≤15% of 6+ letters: `gxecgcx`, `blsyqsz`, `ceffknks`);
+- letter pairs no English word uses: mean ln P(bigram) < −3.9 over 5+ letters (`bqpxaf`, `zfxfa`, `twxauxjpfivt`). The table (`classify/bigrams.py`, 6 KB) is derived from the letter pairs of macOS's /usr/share/dict/words (public-domain Webster's Second); only the table is stored.
+
+Run over all 160 domains it flags 30; each looks machine-generated or digit-stuffed and no ordinary name is flagged. **Known limitation, tested as such:** pronounceable made-up names are not caught. `kisngaf` (−3.26) scores the same as `claudetf` (−3.25), `sebca` (−3.25) and `bitget` (−3.10); `koserwry`, `proymsi`, `busigirh` likewise. A threshold that caught them would flag real names too. I kept it conservative on purpose, because a weak signal can flip a dead site under the signals-only rule (see fix 2).
+
+## 2026-10-05 05:10 · H+? · RESULT: pilot-5 rescore after the four fixes (saved evidence, no visits)
+Heuristic p_h (before → after) and final p; "before" is the original `checkpoint.jsonl`:
+
+| site | p_h | final p | verdict | what changed |
+|---|---|---|---|---|
+| 012 | 0.18→0.95 | 0.73→0.96 | scam | weekly returns, profit + capital |
+| 087 | 0.50→0.99 | 0.84→0.98 | scam | plan returns ("Duration: 1 Week"), SEC claim |
+| 021 | 0.12→0.38 | 0.65→0.71 | scam | crypto-only payments for stock trading |
+| 027 | 0.12→0.38 | 0.54→0.55 | scam | "Activation Wallet"; contract `0xe90D…` no longer reported |
+| 067 | 0.18→0.27 | 0.49→0.50 | scam | random-looking domain (3455n.top) |
+| 100 | 0.18→0.27 | 0.66→0.68 | scam | random-looking domain (usdc661.com) |
+| 004 | 0.27→0.27 | 0.17→0.55 | **not_scam→scam** | now `parked`; dead-site rule leans scam on .cloud TLD + invalid cert alone |
+
+All other 11 sites unchanged. Verdicts 13/5 → 14/4; the one flip (#004) is a calibration case for M4, not a detector win: a parked domain with only weak signals gets 0.55. Still low heuristic scores on #055, #057, #100, #128 (their text isn't covered); the LLM carries them.

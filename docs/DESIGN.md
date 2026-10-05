@@ -131,7 +131,8 @@ scam-website-detector-agent/
 │   │   └── extractor.py         # snapshot → list[CryptoAddress] (merge + dedupe)
 │   │
 │   ├── classify/
-│   │   ├── domain.py            # domain age, TLD, typosquat distance to brands
+│   │   ├── domain.py            # domain age, TLD, typosquat distance to brands, random-looking names
+│   │   ├── bigrams.py           # English letter-pair table (generated) for the random-name check
 │   │   ├── signals.py           # content heuristics → list[Signal]
 │   │   ├── llm_judge.py         # Claude call → structured verdict
 │   │   └── scorer.py            # fuse signals + judge → Classification
@@ -969,7 +970,7 @@ snapshot ─► patterns.py   finds candidates in: visible text, attributes, scr
 **Classification (`classify/`):**
 
 1. `domain.py` + `signals.py` produce weighted `Signal`s: typosquat distance to `brands.yaml`, cheap TLD, guaranteed returns ("% daily," "risk-free"), invite-code fields, seed-phrase inputs, countdown/urgency, fake licensing claims, mismatched branding, missing company info.
-   Each signal has a **tier**: **strong** (seed-phrase field on a non-wallet domain, brand impersonation on a foreign domain, guaranteed returns, send-to-receive giveaway: one is near-decisive), **moderate** (invite code required, very new domain, cheap TLD or free hosting, fake licensing claims, pressure tactics, withdrawal fees: several together make a case), **weak** (shows a crypto address, shows none, unpolished design, invalid TLS certificate from triage: never decisive alone).
+   Each signal has a **tier**: **strong** (seed-phrase field on a non-wallet domain, brand impersonation on a foreign domain, guaranteed returns, send-to-receive giveaway: one is near-decisive), **moderate** (invite code required, very new domain, cheap TLD or free hosting, fake licensing claims, pressure tactics, withdrawal fees: several together make a case), **weak** (shows a crypto address, shows none, unpolished design, invalid TLS certificate from triage, random-looking domain: never decisive alone).
 2. `llm_judge.py` sends Claude a screenshot, sanitized text excerpt, and the signal list, and asks for an `LLMJudgment` (structured output) that must **quote** its evidence.
 3. `scorer.py` fuses them:
    - **Hard rules first:** seed-phrase field on a non-wallet domain → scam (`scam_probability` ≥0.9). Cloudflare "Suspected phishing" interstitial → scam (strong third-party evidence; `scam_probability` ≥0.8, calibrate). Parked / empty with no snapshot → dead-site policy (§5.2a).
