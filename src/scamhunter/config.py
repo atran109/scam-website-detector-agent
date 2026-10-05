@@ -58,7 +58,8 @@ class LLMSettings(_Section):
     judge_model: str
     navigator_model: str
     helper_model: str
-    temperature: float
+    judge_effort: Literal["low", "medium", "high", "xhigh", "max"]
+    gateway_url: str
     cache_responses: bool
 
 

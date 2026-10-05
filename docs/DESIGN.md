@@ -143,7 +143,8 @@ scam-website-detector-agent/
 │   │   └── loop.py              # observe → decide → act → extract loop
 │   │
 │   ├── llm/
-│   │   ├── client.py            # Anthropic wrapper: retries, caching, token accounting
+│   │   ├── gateway.py           # llm-gateway service: holds the API key, role→model, whitelist, cache, usage log
+│   │   ├── client.py            # crawler-side client for the gateway: retries, token accounting
 │   │   └── sanitize.py          # wraps untrusted page content for prompts
 │   │
 │   └── report/
@@ -775,11 +776,12 @@ http:
   chrome_major_version: 154         # current stable Chrome; UA + client hints are built from it
   accept_language: "en-US,en;q=0.9"
 llm:
-  judge_model: "<sonnet-class>"
-  navigator_model: "<sonnet-class>"
-  helper_model: "<haiku-class>"     # simple yes/no sub-calls; revisit after measuring the first 10 sites
-  temperature: 0
-  cache_responses: true
+  judge_model: "claude-sonnet-5-5"
+  navigator_model: "claude-sonnet-5-5"
+  helper_model: "claude-haiku-4-5"  # simple yes/no sub-calls; revisit after measuring the first 10 sites
+  judge_effort: "medium"            # low | medium | high; tune on hand labels
+  gateway_url: "http://llm-gateway:8080"
+  cache_responses: true             # reproducibility: current models reject non-default temperature
 classify:
   uncertain_band: [0.35, 0.65]      # triggers navigation and/or second look
   scam_threshold: 0.45              # verdict = scam if fused score >= this (slight recall lean); calibrate on labels
@@ -857,7 +859,7 @@ An assumption is "valid" here if it's (a) reasonable given the evidence, (b) sta
 |---|---|---|---|
 | A21 | **An LLM given a screenshot + text + heuristic signals classifies well** | Scam cues are semantic ("guaranteed 2% daily") and visual (cloned branding) | Heuristics act as a sanity floor; disagreements get flagged |
 | A22 | **LLM self-reported probability isn't calibrated on its own** | Known behavior | Confidence is a documented fusion (§5.4), checked against hand labels |
-| A23 | **Temperature 0 + response caching gives reproducible-enough runs** | Removes most variance | Note in README that reruns may differ slightly |
+| A23 | **Response caching gives reproducible-enough runs** (current models reject non-default `temperature`, so caching by request hash is the only lever) | Identical inputs replay the stored answer | Note in README that uncached reruns may differ slightly |
 | A24 | **LLM cost stays modest** (one judge call per live site, plus navigation steps on a subset) | Budgets cap steps | Measure after the first 10 sites; switch the navigator to a cheaper model if needed |
 
 ### 4.5 Security, ethics, environment
@@ -1037,7 +1039,7 @@ A rejected action is fed back to the model as a tool error, so it can choose som
 | **Browser** | Chromium sandbox **on** (`chromium_sandbox=True`; Playwright's default adds `--no-sandbox`), verified inside the container by `make selftest` (renderers run seccomp-filtered in their own user namespace); fresh context per site; downloads denied; permissions denied (notifications, camera, mic, geolocation, clipboard read); no extensions; non-http(s) schemes aborted via routing; service workers blocked; popups captured and closed | Drive-by downloads, persistence, cross-site leakage |
 | **Application** | Action whitelist; same-domain `goto`; identity placeholders; payment and sign actions blocked; per-site budgets | Agent doing something harmful or costly |
 | **LLM** | Page content wrapped in delimited "untrusted data" blocks (`sanitize.py`); system prompt says to ignore embedded instructions; structured outputs validated by Pydantic; LLM output never executed as code | Prompt injection steering the classifier or agent |
-| **Secrets** | API key only via env var in `.env` (gitignored); never written to logs or traces; synthetic credentials stored per site for reproducibility | Key leakage |
+| **Secrets** | API key only in `.env` (gitignored), loaded only into the `llm-gateway` container, never the crawler. The gateway sits on the internal network and reaches only `api.anthropic.com` (Squid port 3129); it chooses the model by role, rejects server tools/MCP/containers, caps `max_tokens`, caches responses and logs token usage without content. Never written to logs or traces; synthetic credentials stored per site for reproducibility | Key leakage; a compromised crawler using the API as an egress channel |
 
 #### 5.6.1 Deployment: where it runs
 

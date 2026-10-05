@@ -34,7 +34,7 @@ build:
 
 selftest: build
 	@mkdir -p runs/$(RUN_ID)
-	$(COMPOSE) up -d --force-recreate --wait egress-proxy
+	$(COMPOSE) up -d --force-recreate --wait egress-proxy llm-gateway
 	$(COMPOSE) run --rm crawler python docker/selftest.py
 
 triage: selftest

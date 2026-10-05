@@ -28,11 +28,12 @@ http:
   chrome_major_version: 154         # current stable Chrome; UA + client hints are built from it
   accept_language: "en-US,en;q=0.9"
 llm:
-  judge_model: "<sonnet-class>"
-  navigator_model: "<sonnet-class>"
-  helper_model: "<haiku-class>"     # simple yes/no sub-calls; revisit after measuring the first 10 sites
-  temperature: 0
-  cache_responses: true
+  judge_model: "claude-sonnet-5-5"
+  navigator_model: "claude-sonnet-5-5"
+  helper_model: "claude-haiku-4-5"  # simple yes/no sub-calls; revisit after measuring the first 10 sites
+  judge_effort: "medium"            # low | medium | high; tune on hand labels
+  gateway_url: "http://llm-gateway:8080"
+  cache_responses: true             # reproducibility: current models reject non-default temperature
 classify:
   uncertain_band: [0.35, 0.65]      # triggers navigation and/or second look
   scam_threshold: 0.45              # verdict = scam if fused score >= this (slight recall lean); calibrate on labels

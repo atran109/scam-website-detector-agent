@@ -16,7 +16,9 @@ services:
   crawler:
     build: {context: ., target: base}
     networks: [internal]                          # internal only: no direct internet route
-    depends_on: [egress-proxy]
+    depends_on:
+      egress-proxy: {condition: service_started}
+      llm-gateway: {condition: service_healthy}
     environment:
       RUN_ID: ${RUN_ID:-adhoc}
       EGRESS_PROXY: http://egress-proxy:3128
@@ -33,6 +35,27 @@ services:
     cpus: 4
     shm_size: 1g                                  # Chromium uses /dev/shm heavily
     init: true                                    # reap orphaned browser processes
+
+  llm-gateway:                                    # the only container with the API key
+    build: {context: ., target: gateway}
+    networks: [internal]                          # no direct internet: API via proxy port 3129
+    depends_on: [egress-proxy]
+    env_file: [.env]
+    environment:
+      ANTHROPIC_PROXY: http://egress-proxy:3129
+      LLM_CACHE_DIR: /app/llm
+    volumes:
+      - ./runs/llm_cache:/app/llm                 # response cache + token usage log
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    pids_limit: 128
+    cpus: 1
 
   browser-tests:                                  # offline Chromium tests: no network at all
     profiles: [test]

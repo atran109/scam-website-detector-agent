@@ -71,6 +71,39 @@ def check_container() -> None:
     record("no effective capabilities", int(cap_eff, 16) == 0, f"CapEff={cap_eff}")
 
 
+# ---------- 1b. Secrets stay in the gateway ----------
+
+
+async def check_llm_isolation() -> None:
+    leaked = [k for k in os.environ if k.startswith("ANTHROPIC") and "PROXY" not in k]
+    record("no API key in crawler env", not leaked, f"ANTHROPIC* vars: {leaked or 'none'}")
+    gateway = load_settings().llm.gateway_url
+    async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
+        try:
+            health = (await client.get(f"{gateway}/health")).status_code
+        except httpx.HTTPError as exc:
+            health = f"unreachable: {exc}"
+        record("llm-gateway reachable", health == 200, f"GET /health → {health}")
+        bad = {"role": "judge", "site_id": "selftest", "purpose": "selftest",
+               "request": {"messages": [{"role": "user", "content": "x"}], "max_tokens": 10,
+                           "tools": [{"type": "web_fetch_20260209", "name": "web_fetch"}]}}
+        try:
+            resp = await client.post(f"{gateway}/v1/messages", json=bad)
+            ok, detail = resp.status_code == 400, f"{resp.status_code} {resp.json().get('error')}"
+        except httpx.HTTPError as exc:
+            ok, detail = False, f"unreachable: {exc}"
+        record("gateway rejects server tools", ok, detail)
+    llm_proxy = proxy_url_for_llm()
+    async with httpx.AsyncClient(proxy=llm_proxy, trust_env=False, timeout=20) as client:
+        status, squid_error = await proxy_outcome(client, ALLOWED_URL)
+        record("LLM proxy port denies non-Anthropic hosts", status == 403,
+               f"{ALLOWED_URL} via {llm_proxy}: status={status} squid={squid_error}")
+
+
+def proxy_url_for_llm() -> str:
+    return require_egress_proxy().rsplit(":", 1)[0] + ":3129"
+
+
 # ---------- 2. No direct route out ----------
 
 
@@ -231,6 +264,7 @@ async def main() -> int:
     print(f"Selftest (run {run_id}, proxy {proxy})")
 
     check_container()
+    await check_llm_isolation()
     check_direct_egress()
     await check_proxy(proxy)
     await check_browser(proxy)

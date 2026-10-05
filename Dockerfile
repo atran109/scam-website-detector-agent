@@ -31,6 +31,19 @@ USER crawler
 
 CMD ["scamhunter", "--help"]
 
+# LLM gateway: no browser, only the API client. Holds the API key; the crawler never does.
+FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS gateway
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_ROOT_USER_ACTION=ignore \
+    SCAMHUNTER_HOME=/app
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install "anthropic==1.11.0" "pydantic==2.13.5" "pyyaml==6.0.3" && pip install --no-deps .
+COPY config ./config
+RUN useradd --uid 10002 gateway && mkdir -p /app/llm && chown gateway:gateway /app/llm
+USER gateway
+CMD ["python", "-m", "scamhunter.llm.gateway"]
+
 # Offline browser tests (make test-browser): same image plus pytest and the tests.
 FROM base AS test
 USER root
