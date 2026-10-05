@@ -44,13 +44,18 @@ down:
 	docker compose down
 
 run: selftest
-	@echo "make run: not implemented (M2)"; exit 1
+	$(COMPOSE) run --rm crawler scamhunter run --run-id $(RUN_ID) $(ARGS)
 
+# Re-classify from saved evidence; no site visits, so no selftest gate. Needs the gateway.
+RUN ?=
 rescore:
-	@echo "make rescore: not implemented (M2)"; exit 1
+	@test -n "$(RUN)" || (echo "usage: make rescore RUN=runs/<id>"; exit 1)
+	$(COMPOSE) up -d --wait llm-gateway
+	$(COMPOSE) run --rm --no-deps crawler scamhunter rescore --run-id $(notdir $(RUN))
 
 eval:
 	@echo "make eval: not implemented (M4)"; exit 1
 
 report:
-	@echo "make report: not implemented (M2)"; exit 1
+	@test -n "$(RUN)" || (echo "usage: make report RUN=runs/<id>"; exit 1)
+	$(BIN)/scamhunter report --run-id $(notdir $(RUN))
