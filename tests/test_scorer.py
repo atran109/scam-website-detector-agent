@@ -134,7 +134,7 @@ def test_recall_band_gives_scam_below_half_confidence() -> None:
 
 
 def test_dead_site_policy() -> None:
-    signals = domain_signals("bitocitex.com", "bitocitex.com", BRANDS)
+    signals = domain_signals("web3.bitgettwallet.shop", "bitgettwallet.shop", BRANDS)
     lean = score_without_content(signals, T, "DNS does not resolve")
     assert lean.verdict == Verdict.SCAM and lean.evidence_source == EvidenceSource.SIGNALS_ONLY
     assert 0.5 <= lean.scam_probability <= 0.65
@@ -215,3 +215,17 @@ def test_pronounceable_made_up_names_are_a_known_miss() -> None:
 def test_free_hosting_hosts_skip_the_random_check() -> None:
     signals = domain_signals("ca7ggs-xj.myshopify.com", "myshopify.com", BRANDS)
     assert "random_looking_domain" not in names(signals) and "free_hosting" in names(signals)
+
+
+def test_finance_word_in_domain_is_not_dead_site_evidence() -> None:
+    """Pilot-5: cryptotrackerapp.com, keystonevaults.com (confirmed legitimate) both carry
+    finance_terms_in_domain; on a dead site it must not lean scam, and must not be listed."""
+    for host in ("keystonevaults.com", "cryptotrackerapp.net", "bitocitex.com"):
+        signals = domain_signals(host, host, BRANDS)
+        assert "finance_terms_in_domain" in names(signals)  # still produced for live sites
+        dead = score_without_content(signals, T, "DNS does not resolve")
+        assert dead.verdict == Verdict.NOT_SCAM and dead.evidence_source == EvidenceSource.NONE
+        assert "finance_terms_in_domain" not in names(dead.signals)
+    # other weak evidence still counts: a brand lookalike keeps the lean-scam verdict
+    brand = domain_signals("bitgettwallet.shop", "bitgettwallet.shop", BRANDS)
+    assert score_without_content(brand, T, "x").verdict == Verdict.SCAM

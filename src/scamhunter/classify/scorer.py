@@ -129,10 +129,18 @@ def score_content(
     return _finish(p, threshold, scam_type, reasoning, signals, judgment, method, source), notes
 
 
+# Signals that do not count as evidence when there is no page content to judge. A finance word in
+# a domain name fired on 3 of the 4 sites confirmed legitimate in pilot-5 (cryptotrackerapp,
+# keystonevaults, bradfordtradeins…), so on its own it says nothing about a dead site. Still
+# used for live sites, where it is one weak signal among many (to be re-measured, see PLAN M4).
+DEAD_SITE_IGNORED = frozenset({"finance_terms_in_domain"})
+
+
 def score_without_content(
     signals: list[Signal], threshold: float, status_note: str
 ) -> Classification:
     """Dead-site policy steps 2-3 (DESIGN §5.2a): no page content to judge."""
+    signals = [s for s in signals if s.name not in DEAD_SITE_IGNORED]
     for s in signals:
         if s.name in HARD_RULES:
             floor, rule_type = HARD_RULES[s.name]
