@@ -194,3 +194,12 @@ Findings:
 - **M2:** retry `tls_error` + `timeout` sites (incl. #112 ReadTimeout) once in Chromium before calling them dead (Python's TLS fingerprint may be cloaked against).
 - **M6:** re-run triage on a different day before the final batch.
 - **README limitations note:** some dead/timeout sites may be geo-blocking a residential US IP rather than down (A13).
+
+## 2026-10-04 20:30 · H+? · DECISION: M2 step 1, extraction design details
+- **API key placement (M2 plan):** a separate `llm-gateway` container holds the key; the crawler never does. Models: judge `claude-sonnet-5-5`, helper `claude-haiku-4-5`; measure on the first 10 sites. Solana-format strings (no checksum) only count next to a "SOL/Solana" label.
+- **Validators:** own base58check and bech32/bech32m code (BIP-173/350 reference); EIP-55 via pycryptodome keccak (hashlib's sha3_256 is not keccak). Checked against published vectors (BIP-173/350, EIP-55, wiki examples, USDT/USDC contracts, XRPL genesis); one-character mutations are rejected.
+- **Context windows:** a ±200-char window bled across page sections (a footer address inherited "deposit" from the section above). Labels and payment context now use a tight "near" context. For visible text: the address's own line plus up to 3 lines above, stopping at any line that holds another address-like token (each address owns the lines above it up to the previous address). For JSON/attributes/scripts: ±100 chars. The ±200 window remains for evidence snippets. Capture-time DOM-block context would be better still if pilots show mislabels.
+- **Tier rules as implemented:** primary if the stage is authenticated/deposit, the source is QR or wallet mock, a payment keyword is in near context (not for scripts), or a network response names coin + network. QR codes count as payment context.
+- **"Mentioned elsewhere on page" (0.4)** adds every compatible coin, not just one.
+- **QR codes:** decoded from the full-page screenshot (covers img, canvas, CSS backgrounds) with zxing-cpp + Pillow.
+- **Problem found:** YAML parses unquoted `0x…` as hex integers, so EVM blocklist entries loaded as numbers. All entries quoted (config + DESIGN §3.5); the loader now rejects non-strings.

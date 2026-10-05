@@ -6,13 +6,17 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 # Pinned exactly for reproducibility. Add each dependency in the milestone that first uses it.
 dependencies = [
+    "anthropic==1.11.0",
     "brotli==1.2.0",          # httpx decoding for Accept-Encoding: br
     "httpx==0.28.1",
+    "pillow==12.3.0",
     "playwright==1.63.0",     # keep in sync with PLAYWRIGHT_VERSION in Dockerfile (tested)
+    "pycryptodome==3.24.0",   # keccak-256 for EIP-55 (hashlib's sha3_256 is not keccak)
     "pydantic==2.13.5",
     "pyyaml==6.0.3",
     "tldextract==5.4.0",
     "zstandard==0.25.0",      # httpx decoding for Accept-Encoding: zstd
+    "zxing-cpp==3.1.1",       # QR decoding
 ]
 
 [project.optional-dependencies]

@@ -723,20 +723,20 @@ The example below is illustrative, not a real finding (`TXyz…` is a placeholde
 
 ### 3.5 Reference data
 
-**`config/address_blocklist.yaml`**: addresses that look valid but are never the scammer's.
+**`config/address_blocklist.yaml`**: addresses that look valid but are never the scammer's. Quote every entry: YAML reads an unquoted `0x…` as a hex integer.
 
 ```yaml
 token_contracts:            # appear in JS/web3 code constantly
-  - 0xdAC17F958D2ee523a2206206994597C13D831ec7   # USDT ERC-20
-  - 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48   # USDC ERC-20
-  - TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t           # USDT TRC-20
-  - TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8           # USDC TRC-20
+  - "0xdAC17F958D2ee523a2206206994597C13D831ec7"   # USDT ERC-20
+  - "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"   # USDC ERC-20
+  - "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"           # USDT TRC-20
+  - "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8"           # USDC TRC-20
 special:
-  - 0x0000000000000000000000000000000000000000   # zero address
-  - 0x000000000000000000000000000000000000dEaD   # burn
+  - "0x0000000000000000000000000000000000000000"   # zero address
+  - "0x000000000000000000000000000000000000dEaD"   # burn
 examples:                   # documentation/test addresses
-  - 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa           # BTC genesis
-  - bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq   # common BIP example
+  - "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"           # BTC genesis
+  - "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"   # common BIP example
 ```
 
 Extend this during the run: any address seen on many unrelated sites is probably a library constant, not a scammer wallet.
