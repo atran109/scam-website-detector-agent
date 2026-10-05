@@ -1,0 +1,15 @@
+CryptoTracker
+
+Your comprehensive crypto portfolio management solution. Track wallets, monitor prices, and manage your investments in real-time.
+
+Wallet Tracking
+Add and monitor multiple cryptocurrency wallets with real-time balance updates and comprehensive analytics
+Real-time Prices
+Get live cryptocurrency prices and track your portfolio performance with advanced charting and analytics
+Multi-Currency
+View your portfolio value in multiple fiat currencies with live exchange rates and global market insights
+Get Started
+Sign in securely to access your personalized crypto portfolio dashboard with advanced analytics
+Sign In Securely
+
+Powered by Internet Identity for secure, decentralized authentication

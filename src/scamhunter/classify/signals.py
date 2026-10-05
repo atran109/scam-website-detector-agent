@@ -19,6 +19,12 @@ TEXT_RULES: list[tuple[str, SignalTier, re.Pattern[str]]] = [
         _rx(
             r"\d+(?:\.\d+)?\s?%\s*(?:daily|per day|a day|/day|every day|per hour|hourly|/h\b)",
             r"(?:daily|hourly)\s+(?:profit|return|income|interest)s?\s+(?:of\s+)?\d+(?:\.\d+)?\s?%",
+            # fixed percentage per longer period: "6.5 % Weekly", "15% per month"
+            r"\d+(?:\.\d+)?\s?%\s*(?:weekly|monthly|per week|per month|a week|a month"
+            r"|every week|every month|/week|/month|/wk|/mo\b)",
+            # investment-plan tiers: "Silver - 10% Min: $5,000 Max: $9,999 Duration: 1 Week"
+            r"\d+(?:\.\d+)?\s?%[\s\S]{0,120}?(?:duration|term|period)\s*:?\s*\d+\s*"
+            r"(?:hours?|days?|weeks?|months?)\b",
             r"guaranteed\s+(?:profit|return|income|payout)s?",
             r"risk[- ]free\s+(?:profit|return|invest)",
             r"日收益",
@@ -66,7 +72,16 @@ TEXT_RULES: list[tuple[str, SignalTier, re.Pattern[str]]] = [
             r"unlock\s+(?:your\s+)?(?:funds|withdrawal|account)",
             r"(?:tax|fee)\s+before\s+(?:you\s+can\s+)?withdraw",
             r"deposit\s+to\s+activate",
-            r"activation\s+(?:fee|deposit)",
+            r"activation\s+(?:fee|deposit|wallet|address|payment)",
+        ),
+    ),
+    (
+        "profit_plus_capital",
+        SignalTier.MODERATE,
+        _rx(
+            r"(?:total\s+)?profit\s*\+\s*capital",
+            r"capital\s*\+\s*(?:profit|interest|returns?)",
+            r"principal\s*\+\s*(?:profit|interest)",
         ),
     ),
     (
@@ -74,6 +89,11 @@ TEXT_RULES: list[tuple[str, SignalTier, re.Pattern[str]]] = [
         SignalTier.MODERATE,
         _rx(
             r"(?:licensed|regulated|authori[sz]ed)\s+by\s+(?:the\s+)?(?:fca|sec|asic|cysec|nfa|finra|fincen)",
+            r"(?:registered with|regulated by|licen[cs]ed (?:by|with)|authori[sz]ed by"
+            r"|supervised by)[^.\n]{0,80}?(?:securities and exchange commission|\(sec\)|\bsec\b"
+            r"|financial conduct authority|\bfca\b|\basic\b|\bcysec\b|\bfinra\b|\bcftc\b"
+            r"|\bfincen\b|\bnfa\b)",
+            r"\b(?:sec|fca|asic|cysec)\s+(?:registered|regulated|licen[cs]ed|authori[sz]ed)\b",
             r"\bmsb\s+licen[cs]e",
             r"us\s+msb",
         ),
@@ -109,6 +129,47 @@ _SEED_INPUT = _rx(
 _WALLET_PROVIDERS = ("metamask.io", "trustwallet.com", "ledger.com", "trezor.io")
 
 
+_COINS = re.compile(
+    r"\b(?:bitcoin|btc|ethereum|eth|tether|usdt|usdc|tron|trx|bnb|binance coin|litecoin|ltc"
+    r"|dogecoin|doge|ripple|xrp|solana)\b",
+    re.I,
+)
+_PAYMENT_WORDS = re.compile(r"deposit|fund(?:s|ing)?\b|pay(?:ment)?s?\b|checkout|recharge", re.I)
+_FIAT_METHODS = re.compile(
+    r"visa|master\s?card|paypal|credit card|debit card|bank transfer|wire transfer|apple pay"
+    r"|google pay|\bsepa\b|\bach\b",
+    re.I,
+)
+# Products that normally take card/bank payment; a crypto exchange or wallet is not one.
+_NON_CRYPTO_PRODUCT = re.compile(
+    r"\bstocks?\b|stock market|brokerage|insurance|real estate|add to cart|checkout", re.I
+)
+_COIN_WINDOW = 250  # characters after a deposit/payment word searched for coin names
+_FIAT_WINDOW = 150  # characters before it also searched for card/bank options
+
+
+def crypto_only_payments(text: str) -> Signal | None:
+    """Several coins offered as the way to pay/deposit for a non-crypto product (stocks,
+    shop checkout, insurance…), with no card, bank or PayPal option near the payment text.
+    The fiat check is local: a stock-ticker widget listing "Visa" must not count as a
+    payment method."""
+    product = _NON_CRYPTO_PRODUCT.search(text)
+    if not product:
+        return None
+    for m in _PAYMENT_WORDS.finditer(text):
+        around = text[max(0, m.start() - _FIAT_WINDOW) : m.start() + _COIN_WINDOW]
+        coins = {c.lower() for c in _COINS.findall(text[m.start() : m.start() + _COIN_WINDOW])}
+        if len(coins) >= 3 and not _FIAT_METHODS.search(around):
+            return Signal(
+                name="crypto_only_payments",
+                tier=SignalTier.MODERATE,
+                weight=WEIGHTS[SignalTier.MODERATE],
+                evidence=f'"{product.group()}" product, payment only in {sorted(coins)[:4]}',
+                source="content",
+            )
+    return None
+
+
 def content_signals(visible_text: str, html: str, host: str) -> list[Signal]:
     signals: list[Signal] = []
     for name, tier, pattern in TEXT_RULES:
@@ -122,6 +183,8 @@ def content_signals(visible_text: str, html: str, host: str) -> list[Signal]:
                     source="content",
                 )
             )
+    if crypto_only := crypto_only_payments(visible_text):
+        signals.append(crypto_only)
     if (m := _SEED_INPUT.search(html)) and not host.endswith(_WALLET_PROVIDERS):
         signals.append(
             Signal(

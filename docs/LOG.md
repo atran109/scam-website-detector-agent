@@ -255,3 +255,15 @@ Open for later milestones:
 - **Safety:** static HTML; all page/LLM text escaped and stripped of control/bidi characters; truncated with an explicit marker; no `<script>`, iframes or external URLs; saved page HTML, traces and network bodies are never embedded or linked; only PNGs under the run's `sites/` folder are referenced, by relative path.
 - **CSP deviation:** the requested `default-src 'none'; img-src 'self'` blocks inline `<style>`, so the CSS is a sibling `style.css` and the policy adds `style-src 'self'`. Checked in Chromium from `file://`: all 15 screenshots of pilot-5 load, styles apply, no CSP violations.
 - `labels_template.csv` is for hand labeling (`my_label`, `my_notes` blank); it never touches `eval/labels.csv`, which stays a manual copy step.
+
+## 2026-10-05 03:20 · H+? · DECISION: content-signal detectors from pilot-5 review (fix 1 of 4)
+Review of pilot-5 showed content signals barely fired: #012 ("6.5 % Weekly", "Total profit + Capital"), #087 ("Silver - 10% … Duration: 1 Week", "registered with and duly regulated by the US's … (SEC)") and #021 (stock-trading platform that takes only Bitcoin, Ethereum, Binance Coin, Tether, Tron) carried only domain signals. Added, reusing the existing tiers and weights (scoring untouched until M4):
+- `guaranteed_returns` (strong) now also matches a percent per week/month and plan tiers (percent followed within 120 chars by "Duration/Term/Period: N hours/days/weeks/months"). A bare percentage is deliberately not enough: stock-quote text like "+1.02%" must stay quiet.
+- `profit_plus_capital` (moderate, new): "profit + capital", "principal + interest".
+- `license_claims` (moderate): "registered with / regulated by / licensed by … Securities and Exchange Commission / SEC / FCA / ASIC / CFTC…" and "SEC registered".
+- `withdrawal_conditions` (moderate): also "activation wallet/address/payment" (fired on #027's "Activation Wallet").
+- `crypto_only_payments` (moderate, new): ≥3 coins offered within 250 chars after a deposit/payment word on a page selling a non-crypto product (stocks, insurance, real estate, checkout) with no card/bank/PayPal option near that text. First version checked the whole page for "Visa" and missed #021 because its stock-ticker widget lists Visa; the check is now local to the payment text.
+
+Tests use the saved pilot texts (copied to `tests/fixtures/pilot_texts/`, since `runs/` is gitignored) and negatives (#022, #051, stock quotes, ordinary percentages).
+
+**Rescore of pilot-5 (saved evidence, no visits), heuristic p_h → final p:** #012 0.18→0.95 / 0.73→0.96; #087 0.50→0.99 / 0.84→0.98; #021 0.12→0.38 / 0.65→0.71; #027 0.12→0.38 / 0.54→0.62 (activation wallet). Every other site's heuristic score is unchanged and no verdict flipped. 1 of the 4 target gaps remains a heuristic/LLM disagreement: #055, #057, #100, #128 still sit at p_h 0.18–0.38 (their text isn't covered by these rules); the LLM carries them.
