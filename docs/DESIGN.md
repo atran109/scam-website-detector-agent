@@ -109,12 +109,13 @@ scam-website-detector-agent/
 │   ├── models.py                # ALL Pydantic models + enums (the ontology, §3)
 │   ├── pipeline.py              # per-site state machine + run orchestration
 │   ├── store.py                 # JSONL checkpoint store, resume, artifact paths
+│   ├── mock_mode.py             # loads the local mock exchange for `--mock` (loopback-only trial)
 │   │
 │   ├── triage/
 │   │   └── liveness.py          # HTTP probe, parked/suspended/challenge detection
 │   │
 │   ├── browser/
-│   │   ├── sandbox.py           # browser launch, hardened context, routing rules
+│   │   ├── sandbox.py           # browser launch, hardened context, routing rules, mock-mode loopback guard
 │   │   ├── wayback.py           # Wayback CDX lookup + usable-snapshot choice (dead-site policy step 1)
 │   │   ├── capture.py           # DOM, accessibility tree, screenshot, network log, Playwright trace
 │   │   ├── page_state.py        # compact page representation for the LLM
@@ -161,7 +162,7 @@ scam-website-detector-agent/
 │
 ├── tests/
 │   ├── fixtures/
-│   │   ├── mock_exchange/       # local fake scam exchange (register → deposit flow)
+│   │   ├── mock_exchange/       # local fake scam exchange: server.py + static/index.html (variants, traps, per-account addresses)
 │   │   └── pages/               # static HTML with planted/decoy addresses
 │   ├── test_validators.py
 │   ├── test_extractor.py
@@ -1047,6 +1048,15 @@ A rejected action is fed back to the model as a tool error, so it can choose som
 | **Application** | Action whitelist; same-domain `goto`; identity placeholders; payment and sign actions blocked; per-site budgets | Agent doing something harmful or costly |
 | **LLM** | Page content wrapped in delimited "untrusted data" blocks (`sanitize.py`); system prompt says to ignore embedded instructions; structured outputs validated by Pydantic; LLM output never executed as code | Prompt injection steering the classifier or agent |
 | **Secrets** | API key only in `.env` (gitignored), loaded only into the `llm-gateway` container, never the crawler. The gateway sits on the internal network and reaches only `api.anthropic.com` (Squid port 3129); it chooses the model by role, rejects server tools/MCP/containers, caps `max_tokens`, caches responses and logs token usage without content. Never written to logs or traces; synthetic credentials stored per site for reproducibility | Key leakage; a compromised crawler using the API as an egress channel |
+
+#### 5.6.0 Mock mode (`--mock`, decided 2026-10-05)
+
+The navigation agent is developed and trialled against the local mock exchange (`tests/fixtures/mock_exchange`) with a real Claude, but no real site. It runs inside the crawler container, which has no route out. The browser has no egress proxy, so loopback is the only thing it may reach, enforced in three layers:
+1. `config.require_loopback_url()`: the `--mock` entry point refuses any URL that is not `localhost` or a literal loopback IP (no `127.0.0.1.nip.io`, no `127.0.0.1@evil.example`, no `127.1`, no other schemes).
+2. **Network layer** (`sandbox.launch_mock_browser`): every destination except loopback goes to a "proxy" nothing listens on, so redirects, IP literals, subresources and websockets all fail inside Chromium. Playwright's request routing alone is not enough: it never sees server redirects, so a loopback page could 302 the browser to `llm-gateway`. `make selftest` found this.
+3. **Route guard** (`sandbox.restrict_to_loopback`, via `new_context(..., loopback_only=True)`): aborts and records non-loopback requests, giving tests a list of what was refused.
+
+`make selftest` proves all three, including a control showing that a plain proxy-less browser in the crawler container *can* reach `llm-gateway` (so the checks are not vacuous), a redirect from a loopback page to an internal service, and a `fetch()` to it. Real runs are unchanged: they keep the egress proxy and the selftest gate, and `launch_browser` requires a proxy.
 
 #### 5.6.1 Deployment: where it runs
 

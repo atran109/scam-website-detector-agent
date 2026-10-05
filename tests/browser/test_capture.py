@@ -19,7 +19,7 @@ from scamhunter.browser.capture import (
     load_snapshots,
     take_snapshot,
 )
-from scamhunter.browser.sandbox import launch_browser, new_context
+from scamhunter.browser.sandbox import launch_mock_browser, new_context
 from scamhunter.config import load_settings
 from scamhunter.extract.blocklist import load_blocklist
 from scamhunter.extract.extractor import extract
@@ -62,8 +62,8 @@ async def _run(url: str, run_dir: Path) -> None:
     settings = load_settings()
     site_dir = run_dir / "sites" / "001"
     async with async_playwright() as pw:
-        browser = await launch_browser(pw, proxy=None)  # offline test: no network at all
-        context = await new_context(browser, settings.browser)
+        browser = await launch_mock_browser(pw)  # offline test: no network at all
+        context = await new_context(browser, settings.browser, loopback_only=True)
         page = await context.new_page()
         recorder = NetworkRecorder(site_dir, run_dir)
         recorder.attach(page)

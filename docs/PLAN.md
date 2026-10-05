@@ -99,7 +99,7 @@ Adjust the hours to the real schedule.
 
 ### M3. Navigation agent
 
-- [ ] Local mock exchange fixture (register → login → deposit → coin/network selector) with failure variants and traps. **Mock mode (decided 2026-10-05):** runs inside the crawler container (no route out); the browser runs without the proxy only under an explicit `--mock` flag that refuses every non-loopback URL; `make selftest` checks that refusal
+- [x] Local mock exchange fixture (register → login → deposit → coin/network selector) with failure variants and traps (step A done 2026-10-05). **Mock mode (decided 2026-10-05):** runs inside the crawler container (no route out); the browser runs without the proxy only under an explicit `--mock` flag that refuses every non-loopback URL; `make selftest` checks that refusal
 - [ ] `elements.py`: accessibility roles **plus** non-semantic clickables (`cursor: pointer`, click handlers)
 - [ ] Tool whitelist incl. `click_at` fallback; policy checks (same-domain, placeholders only, no payments/signing)
 - [ ] Synthetic identity + disposable mailbox (`check_email`)

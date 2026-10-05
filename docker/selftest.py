@@ -10,16 +10,25 @@ import asyncio
 import json
 import os
 import socket
+import socketserver
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import httpx
 from playwright.async_api import async_playwright
 
-from scamhunter.browser.sandbox import launch_browser, new_context
-from scamhunter.config import load_settings, require_egress_proxy
+from scamhunter.browser.sandbox import launch_browser, launch_mock_browser, new_context
+from scamhunter.config import (
+    SandboxError,
+    is_loopback_url,
+    load_settings,
+    require_egress_proxy,
+    require_loopback_url,
+)
 
 ALLOWED_URL = "https://example.com/"
 ALLOWED_HOST = "example.com"
@@ -84,9 +93,16 @@ async def check_llm_isolation() -> None:
         except httpx.HTTPError as exc:
             health = f"unreachable: {exc}"
         record("llm-gateway reachable", health == 200, f"GET /health → {health}")
-        bad = {"role": "judge", "site_id": "selftest", "purpose": "selftest",
-               "request": {"messages": [{"role": "user", "content": "x"}], "max_tokens": 10,
-                           "tools": [{"type": "web_fetch_20260209", "name": "web_fetch"}]}}
+        bad = {
+            "role": "judge",
+            "site_id": "selftest",
+            "purpose": "selftest",
+            "request": {
+                "messages": [{"role": "user", "content": "x"}],
+                "max_tokens": 10,
+                "tools": [{"type": "web_fetch_20260209", "name": "web_fetch"}],
+            },
+        }
         try:
             resp = await client.post(f"{gateway}/v1/messages", json=bad)
             ok, detail = resp.status_code == 400, f"{resp.status_code} {resp.json().get('error')}"
@@ -96,8 +112,11 @@ async def check_llm_isolation() -> None:
     llm_proxy = proxy_url_for_llm()
     async with httpx.AsyncClient(proxy=llm_proxy, trust_env=False, timeout=20) as client:
         status, squid_error = await proxy_outcome(client, ALLOWED_URL)
-        record("LLM proxy port denies non-Anthropic hosts", status == 403,
-               f"{ALLOWED_URL} via {llm_proxy}: status={status} squid={squid_error}")
+        record(
+            "LLM proxy port denies non-Anthropic hosts",
+            status == 403,
+            f"{ALLOWED_URL} via {llm_proxy}: status={status} squid={squid_error}",
+        )
 
 
 def proxy_url_for_llm() -> str:
@@ -244,6 +263,161 @@ async def check_browser(proxy: str) -> None:
         await browser.close()
 
 
+# ---------- 6. Mock mode stays on loopback ----------
+
+NOT_LOOPBACK = [
+    "https://example.com/",
+    "http://10.0.0.5/",
+    "http://192.168.0.1/",
+    "http://169.254.169.254/latest/meta-data/",
+    "http://llm-gateway:8080/health",
+    "http://egress-proxy:3128/",
+    "http://127.0.0.1.nip.io/",
+    "http://127.0.0.1@evil.example/",
+    "file:///etc/passwd",
+]
+
+
+class _LoopbackServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def server_bind(self) -> None:  # skip the stdlib's reverse-DNS lookup (can stall)
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[0], self.server_address[1]
+
+
+class _Local(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/redirect":  # a loopback page bouncing the browser to an internal service
+            self.send_response(302)
+            self.send_header("Location", "http://llm-gateway:8080/health")
+            self.end_headers()
+            return
+        body = b"<html><title>local</title><body>loopback ok</body></html>"
+        self.send_response(200)
+        self.send_header("content-type", "text/html")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt: str, *args: object) -> None:
+        return
+
+
+async def check_mock_mode() -> None:
+    accepted = []
+    for url in NOT_LOOPBACK:
+        try:
+            require_loopback_url(url)
+            accepted.append(url)
+        except SandboxError:
+            pass
+    record(
+        "--mock refuses non-loopback URLs",
+        not accepted,
+        f"{len(NOT_LOOPBACK)} URLs refused" if not accepted else f"ACCEPTED: {accepted}",
+    )
+    record(
+        "--mock accepts loopback",
+        is_loopback_url("http://127.0.0.1:1/") and is_loopback_url("http://localhost/"),
+        "127.0.0.1 and localhost",
+    )
+
+    server = _LoopbackServer(("127.0.0.1", 0), _Local)
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
+    local = f"http://127.0.0.1:{server.server_port}/"
+    settings = load_settings()
+    try:
+        async with async_playwright() as pw:
+            # Control: a plain proxy-less browser CAN reach an internal service. That is why mock
+            # mode needs its guards, and without this the checks below would be vacuous.
+            plain = await pw.chromium.launch(
+                channel="chromium", headless=True, chromium_sandbox=True
+            )
+            open_ctx = await plain.new_context()
+            try:
+                response = await (await open_ctx.new_page()).goto(
+                    "http://llm-gateway:8080/health", timeout=15000
+                )
+                reached = response is not None and response.status == 200
+            except Exception as exc:  # noqa: BLE001
+                reached = False
+                print(f"    control error: {str(exc).splitlines()[0]}")
+            record(
+                "control: unguarded proxy-less browser reaches llm-gateway",
+                reached,
+                "needed to prove the guard is what blocks it",
+            )
+            await open_ctx.close()
+            await plain.close()
+
+            browser = await launch_mock_browser(pw)
+            context = await new_context(browser, settings.browser, loopback_only=True)
+            page = await context.new_page()
+            response = await page.goto(local, timeout=15000)
+            record(
+                "mock-mode browser reaches loopback",
+                response is not None
+                and response.status == 200
+                and "loopback ok" in await page.content(),
+                local,
+            )
+
+            not_blocked = []
+            for url in NOT_LOOPBACK:
+                if not url.startswith("http"):
+                    continue
+                try:
+                    await (await context.new_page()).goto(url, timeout=15000)
+                    not_blocked.append(url)  # navigation succeeded: should be impossible
+                except Exception:  # noqa: BLE001 - a blocked navigation raises
+                    if url not in context.blocked_urls:
+                        not_blocked.append(url)
+            record(
+                "mock-mode browser blocks every non-loopback URL",
+                not not_blocked,
+                f"{len(NOT_LOOPBACK) - 1} navigations aborted by the route guard"
+                if not not_blocked
+                else f"NOT BLOCKED: {not_blocked}",
+            )
+
+            internal = "http://llm-gateway:8080/health"
+            redirect_page = await context.new_page()
+            try:
+                await redirect_page.goto(local + "redirect", timeout=15000)
+            except Exception as exc:  # noqa: BLE001 - the network layer should refuse the hop
+                outcome = str(exc).splitlines()[0][:90]
+            else:
+                outcome = f"landed on {redirect_page.url}"
+            try:
+                landed = await redirect_page.evaluate(
+                    "document.body ? document.body.innerText : ''"
+                )
+            except Exception:  # noqa: BLE001 - Chromium's error page can't be scripted
+                landed = ""
+            record(
+                "redirect from loopback to an internal service is blocked",
+                redirect_page.url != internal and '"ok": true' not in landed,
+                outcome,
+            )
+
+            # no-cors: the promise resolves when the request is sent and rejects only when the
+            # network layer blocks it, so CORS can't make this pass for the wrong reason.
+            fetched = await page.evaluate(
+                f"fetch('{internal}', {{mode: 'no-cors'}}).then(() => 'reached', () => 'blocked')"
+            )
+            record(
+                "fetch() from page JS to an internal service is blocked",
+                fetched == "blocked",
+                f"fetch → {fetched}",
+            )
+            await context.close()
+            await browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 # ---------- 5. Egress log ----------
 
 
@@ -264,6 +438,7 @@ async def main() -> int:
     print(f"Selftest (run {run_id}, proxy {proxy})")
 
     check_container()
+    await check_mock_mode()
     await check_llm_isolation()
     check_direct_egress()
     await check_proxy(proxy)

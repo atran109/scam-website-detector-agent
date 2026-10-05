@@ -1,8 +1,10 @@
 """Load settings.yaml + env into typed Settings."""
 
+import ipaddress
 import os
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict
@@ -119,3 +121,31 @@ def require_egress_proxy() -> str:
             "(EGRESS_PROXY unset or /.dockerenv missing). Use `make triage` / `make run`."
         )
     return proxy
+
+
+def is_loopback_url(url: str) -> bool:
+    """True only for http(s) URLs whose host is `localhost` or a literal loopback IP.
+
+    Deliberately strict: no DNS names that merely resolve to loopback (127.0.0.1.nip.io,
+    localhost.evil.test), no shorthand like `127.1`, no userinfo tricks (the host of
+    http://127.0.0.1@evil.example/ is evil.example), no other schemes."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https") or not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def require_loopback_url(url: str) -> str:
+    """Mock mode (`--mock`) may only visit the local mock exchange (DESIGN §5.5)."""
+    if not is_loopback_url(url):
+        raise SandboxError(f"--mock refuses non-loopback URL: {url!r}")
+    return url

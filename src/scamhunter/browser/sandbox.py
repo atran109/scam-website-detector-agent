@@ -1,24 +1,66 @@
 """Launch the browser and create hardened, per-site contexts with routing rules."""
 
-from playwright.async_api import Browser, BrowserContext, Page, Playwright
+from playwright.async_api import Browser, BrowserContext, Page, Playwright, Route
 
-from scamhunter.config import BrowserSettings
+from scamhunter.config import BrowserSettings, is_loopback_url
 
 
-async def launch_browser(pw: Playwright, proxy: str | None) -> Browser:
+async def launch_browser(pw: Playwright, proxy: str) -> Browser:
     """Chromium with its sandbox ON, all traffic through the egress proxy.
 
     Playwright's default (chromium_sandbox=False) adds --no-sandbox; we never allow that.
     channel="chromium" uses full Chromium in new headless mode rather than the headless shell.
-    proxy=None is only for offline browser tests inside the container, whose network has no
-    route out; every code path that visits real sites passes require_egress_proxy().
+    The proxy is required: every code path that visits real sites passes the value from
+    require_egress_proxy().
     """
     return await pw.chromium.launch(
         channel="chromium",
         headless=True,
         chromium_sandbox=True,
-        proxy={"server": proxy} if proxy else None,
+        proxy={"server": proxy},
     )
+
+
+# Mock mode's network-level guard: everything except loopback goes to a "proxy" that nothing
+# listens on, so it fails inside Chromium's network stack: redirects, IP literals, subresources,
+# websockets and all. (Playwright's request routing alone does NOT see server redirects:
+# a loopback page could 302 the browser to llm-gateway. Found by `make selftest`.)
+DEAD_PROXY = "http://127.0.0.1:1"
+LOOPBACK_BYPASS = "localhost,127.0.0.1,[::1]"
+
+
+async def launch_mock_browser(pw: Playwright) -> Browser:
+    """Chromium for mock mode: can reach loopback only, so it can use the local mock exchange.
+
+    Two layers: the dead-proxy trick above (network level) and, on every context, the route
+    guard (new_context(..., loopback_only=True)) that records what was refused. Never used for
+    real sites; `make selftest` checks that it cannot leave loopback, redirects included."""
+    return await pw.chromium.launch(
+        channel="chromium",
+        headless=True,
+        chromium_sandbox=True,
+        proxy={"server": DEAD_PROXY, "bypass": LOOPBACK_BYPASS},
+    )
+
+
+_ALLOWED_INLINE_SCHEMES = ("data:", "blob:", "about:")
+
+
+async def restrict_to_loopback(context: BrowserContext) -> list[str]:
+    """Abort every request that isn't to loopback. Returns the list that records blocked URLs
+    (for tests and selftest). Covers navigations, subresources, redirects and form posts."""
+    blocked: list[str] = []
+
+    async def handler(route: Route) -> None:
+        url = route.request.url
+        if is_loopback_url(url) or url.startswith(_ALLOWED_INLINE_SCHEMES):
+            await route.continue_()
+        else:
+            blocked.append(url)
+            await route.abort("blockedbyclient")
+
+    await context.route("**/*", handler)
+    return blocked
 
 
 def user_agent(browser: Browser, mobile: bool) -> str:
@@ -42,6 +84,7 @@ async def new_context(
     mobile: bool = False,
     ignore_https_errors: bool = False,
     accept_language: str = "en-US,en;q=0.9",
+    loopback_only: bool = False,
 ) -> BrowserContext:
     """A fresh, isolated context for one site: no downloads, no permissions, no service workers.
     Popups are closed as soon as they open (their URL is still in the trace)."""
@@ -59,6 +102,8 @@ async def new_context(
         ignore_https_errors=ignore_https_errors,  # only for sites triage saw with a bad cert
     )
     context.set_default_timeout(settings.navigation_timeout_ms)
+    if loopback_only:
+        context.blocked_urls = await restrict_to_loopback(context)  # type: ignore[attr-defined]
     context.on("page", _close_if_popup)
     return context
 
