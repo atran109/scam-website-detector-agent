@@ -56,7 +56,7 @@ from scamhunter.models import (
 )
 from scamhunter.report.screenshots import highlight_address
 from scamhunter.store import write_jsonl
-from scamhunter.triage.liveness import make_client, probe
+from scamhunter.triage.liveness import classify_response, make_client, probe
 
 PIPELINE_VERSION = "0.2.0"
 
@@ -319,6 +319,28 @@ class Analysis:
     notes: list[str]
     usage: TokenUsage
     final_url: str | None = None
+    triage: TriageResult | None = None  # set when analysis revised the triage status (parked)
+
+
+def rendered_parked(ctx: RunContext, snapshots: list[PageSnapshot]) -> str | None:
+    """Reason if the last rendered snapshot is a parking page. HTTP triage can't see these:
+    many sit behind a JS redirect (the probe gets a "Redirecting..." stub), so the rendered
+    page is checked with triage's own detector."""
+    if not snapshots:
+        return None
+    last = snapshots[-1]
+    html = (ctx.run_dir / last.html_path).read_text()
+    status, reason = classify_response(200, {}, html, last.url)
+    return reason if status == SiteStatus.PARKED else None
+
+
+def mark_parked(triage: TriageResult, reason: str) -> TriageResult:
+    return triage.model_copy(
+        update={
+            "status": SiteStatus.PARKED,
+            "reason": f"rendered page is a parking page: {reason}",
+        }
+    )
 
 
 def _has_content(ctx: RunContext, snapshots: list[PageSnapshot]) -> bool:
@@ -342,13 +364,22 @@ async def analyze(
     threshold = settings.classify.scam_threshold
     usage = TokenUsage()
     notes: list[str] = []
+    revised: TriageResult | None = None
+    if parked := rendered_parked(ctx, snapshots):
+        revised = triage = mark_parked(triage, parked)
+        notes.append(f"rendered page is a parking page ({parked}): dead-site rule applies")
+        snapshots = []
     base_signals = domain_signals(site.host, site.registrable_domain, ctx.brands) + triage_signals(
         triage
     )
 
     if not snapshots or not _has_content(ctx, snapshots):
         return Analysis(
-            score_without_content(base_signals, threshold, _status_note(triage)), [], notes, usage
+            score_without_content(base_signals, threshold, _status_note(triage)),
+            [],
+            notes,
+            usage,
+            triage=revised,
         )
 
     addresses: list[CryptoAddress] = []
@@ -391,7 +422,7 @@ async def analyze(
     classification, score_notes = score_content(
         signals, judgment, threshold, partial=partial, archived=content.archived
     )
-    return Analysis(classification, addresses, notes + score_notes, usage, last.url)
+    return Analysis(classification, addresses, notes + score_notes, usage, last.url, revised)
 
 
 # ============================================================
@@ -414,7 +445,7 @@ def build_result(
     low = [a for a in analysis.addresses if a.tier == AddressTier.LOW_CONFIDENCE]
     return SiteResult(
         site=site,
-        triage=triage,
+        triage=analysis.triage or triage,  # analysis may have revised the status (parked)
         processing_status=processing,
         classification=analysis.classification,
         addresses=primary if scam else [],
@@ -540,6 +571,12 @@ async def process_site(ctx: RunContext, site: Site, triage: TriageResult) -> Sit
             else:
                 notes.append(f"Chromium recheck also failed ({triage.status.value})")
                 snapshots = []
+
+    if parked := rendered_parked(ctx, snapshots):
+        # Dead-site policy: a parking page is no evidence about the site, so try Wayback next.
+        triage = mark_parked(triage, parked)
+        notes.append(f"rendered page is a parking page ({parked})")
+        snapshots = []
 
     if not snapshots and ctx.settings.features.archive_fallback:
         snapshots, wayback_notes = await recover_from_wayback(ctx, site)

@@ -105,12 +105,40 @@ PARKED_PHRASES = (
     "buy this domain",
     "domain for sale",
     "this domain is parked",
+    "domain is parked",
+    "this web page is parked",
+    "parked domain",
     "parked free, courtesy of",
     "domain parking",
+    "domain name is for sale",
+    "domain is available for purchase",
+    "inquire about this domain",
+    "make an offer on this domain",
 )
 # Parking providers recognizable by script or host, on any page length.
-PARKED_FINGERPRINTS = ("window.park", "sedoparking", "parkingcrew", "bodis.com", "above.com/")
-PARKING_HOSTS = ("sedo.com", "dan.com", "afternic.com", "hugedomains.com", "parkingcrew.net")
+# ParkLogic's page ("This page has been created by ParkLogic.") is usually reached through a
+# JS redirect, so HTTP triage sees only a stub; pipeline.rendered_parked() re-checks the
+# rendered page with this same detector.
+PARKED_FINGERPRINTS = (
+    "window.park",
+    "sedoparking",
+    "parkingcrew",
+    "parklogic",
+    "bodis.com",
+    "above.com/",
+    "undeveloped.com",
+    "hugedomains.com",
+    "afternic.com/",
+)
+PARKING_HOSTS = (
+    "sedo.com",
+    "dan.com",
+    "afternic.com",
+    "hugedomains.com",
+    "parkingcrew.net",
+    "undeveloped.com",
+    "bodis.com",
+)
 
 GEO_PHRASES = (
     "not available in your country",

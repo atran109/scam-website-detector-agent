@@ -1,5 +1,7 @@
 """Tests for triage.liveness pure functions (no network)."""
 
+from pathlib import Path
+
 import pytest
 
 from scamhunter.config import load_settings
@@ -140,3 +142,47 @@ def test_visible_text_and_title() -> None:
     assert visible_text(body) == "My & Site Hello world"
     assert extract_title(body) == "My & Site"
     assert extract_title("<html></html>") is None
+
+
+PILOT = Path(__file__).parent / "fixtures" / "pilot_texts"
+
+
+def test_parklogic_rendered_page_is_parked() -> None:
+    """#004 adnins.cloud: after the JS redirect the page says 'created by ParkLogic'."""
+    html = (PILOT / "004.html").read_text()
+    status, reason = classify_response(200, {}, html, "https://adnins.cloud/")
+    assert status == SiteStatus.PARKED and "parklogic" in reason.lower()
+
+
+def test_http_stub_before_the_redirect_is_not_visibly_parked() -> None:
+    # What HTTP triage saw for #004: why the rendered page must be re-checked in the pipeline.
+    stub = (
+        "<html><head><title>Redirecting...</title></head><body><script>go()</script></body></html>"
+    )
+    status, _ = classify_response(200, {}, stub, "https://adnins.cloud/")
+    assert status == SiteStatus.LIVE
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<h1>This domain is available for purchase</h1>",
+        "<p>This web page is parked free, courtesy of GoDaddy.com</p>",
+        "<p>Inquire about this domain</p>",
+        "<script src='https://sedoparking.com/x.js'></script>",
+        "<p>Powered by ParkingCrew</p>",
+        "<p>Domain parked. Visit hugedomains.com</p>",
+    ],
+)
+def test_other_parking_providers(body: str) -> None:
+    status, _ = classify_response(200, {}, f"<html><body>{body}</body></html>", URL)
+    assert status == SiteStatus.PARKED
+
+
+def test_real_page_mentioning_parked_is_not_parked() -> None:
+    body = (
+        "<html><body><p>"
+        + "Trading platform with daily signals. " * 120
+        + ("Our team parked the old branding.</p></body></html>")
+    )
+    assert classify_response(200, {}, body, URL)[0] == SiteStatus.LIVE
