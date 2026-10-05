@@ -99,15 +99,17 @@ Adjust the hours to the real schedule.
 
 ### M3. Navigation agent
 
-- [ ] Local mock exchange fixture (register → login → deposit → coin/network selector)
+- [ ] Local mock exchange fixture (register → login → deposit → coin/network selector) with failure variants and traps. **Mock mode (decided 2026-10-05):** runs inside the crawler container (no route out); the browser runs without the proxy only under an explicit `--mock` flag that refuses every non-loopback URL; `make selftest` checks that refusal
 - [ ] `elements.py`: accessibility roles **plus** non-semantic clickables (`cursor: pointer`, click handlers)
 - [ ] Tool whitelist incl. `click_at` fallback; policy checks (same-domain, placeholders only, no payments/signing)
 - [ ] Synthetic identity + disposable mailbox (`check_email`)
 - [ ] Iterate every coin and network on the deposit page; extract after every step
 - [ ] Stop conditions and `blocked_at` (invite code, SMS, CAPTCHA, KYC, geo-block, `email_verification`)
 - [ ] Give-up rule: stop a site after 4 consecutive failed steps (`max_consecutive_failures`)
-- [ ] Disposable email: pick one provider with a simple API; if verification email never arrives, record `blocked_at: email_verification` and move on
-- [ ] Mock wallet (`window.ethereum`) via init script, logging requested recipients
+- [ ] Disposable email: **mail.tm** (decided 2026-10-05); API token held in memory only, never logged or written to disk; mail traffic goes through the egress proxy; if the verification email never arrives, record `blocked_at: email_verification` and move on
+- [ ] Policy rules from the 2026-10-05 decisions (deposit amounts, deposit-page clicks, "I have paid"/receipt blocked, wallet clicks, text reply = failed step): DESIGN §5.5
+- [ ] Mock wallet (`window.ethereum`) via init script, logging requested recipients: **deferred until after the pilot, not cut.** Tally wallet-gated sites (`blocked_at: wallet_required`) in the pilot; build it if there are several. Connect-wallet clicks become allowed once it exists (sign/approve stay blocked)
+- [ ] Smaller step budget for `fake_shop` (e.g. 12 instead of 25), set in `agent` settings
 - [ ] Pilot on 10-20 real sites; **tally failure causes**. If element-finding dominates, time-box a 1-2h Stagehand `ElementProvider` trial
 - [ ] (If time) register twice on 3-5 sites to test per-account addresses
 

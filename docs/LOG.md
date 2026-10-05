@@ -325,3 +325,20 @@ Digits (10): datahydru602, small1006, fxo2o, gete84, lon28, 3455n, openai9315, r
 - Decision: `finance_terms_in_domain` is dropped from the dead-site (no-content) rule (`scorer.DEAD_SITE_IGNORED`). It fired on 3 of the 4 sites confirmed legitimate in pilot-5, so by itself it says nothing about a site we can't see. It still appears on live sites as one weak signal. Not hidden from the listing either: dead-site records simply no longer carry it.
 - Effect on `triage-1` (104 not-live sites, current code, no visits): scam verdicts 74 → 60 (14 flips scam → not_scam); weak-only scam verdicts 61 → 47 (1 weak signal: 35, 2: 10, 3: 2); not_scam 30 → 44.
 - **The (a)/(b) choice stays open.** After the full live run, compute the scam base rate among live sites and each signal's scam/legit ratio on live sites, then propose the dead-site rule from those numbers (PLAN M6 item added).
+
+## 2026-10-05 07:00 · H+? · DECISION: M3 decisions from the plan review
+- **Mock mode:** (a). The mock exchange runs inside the crawler container (no route out); under an explicit `--mock` flag the browser runs without the proxy and the code refuses every non-loopback URL. `make selftest` gains a check that `--mock` refuses non-loopback URLs.
+- **Mailbox:** mail.tm; API token in memory only, never logged.
+- **Deposit amounts:** allowed in an amount field on a deposit page: the page's stated minimum, or 100 if none. Confirm/next/recharge clicks on deposit pages only with no card/bank fields and no wallet signature request. "I have paid" and "upload receipt/proof" always blocked.
+- **Wallet:** connect-wallet clicks allowed only with the mock wallet injected (it refuses to sign and logs requested recipients; sign/approve stay blocked). Mock wallet deferred until after the pilot, **not cut**; wallet-gated sites are tallied in the pilot (new `BlockedReason.WALLET_REQUIRED`) and it is built if there are several.
+- **Text reply with no tool call = failed step.** Navigation gate kept; smaller step budget considered for `fake_shop`.
+- **Dead-site rule:** (a)/(b) not picked yet (see the entry above).
+- Policy text is in DESIGN §5.5; PLAN M3 updated.
+
+## 2026-10-05 07:00 · H+? · FINDING: brand-list sweep over the 160 domains (nothing added yet; list awaiting confirmation)
+One-off sweep with a broad brand dictionary from general knowledge (≈115 names and abbreviations) against every registrable label, hyphen part and subdomain. **Provenance note: parts of the brand list were built while reviewing this URL list** (DESIGN §3.5 already says it was "seeded from names visible in the URL list", and the candidates below come from the same review). Brand-signal results on these 160 sites therefore overstate how well the signal generalizes; the README must say so, and the signal's value should be judged on sites outside the list.
+Problems in the existing brand rule found by the sweep (not fixed yet; scoring untouched):
+1. **3-letter brands are skipped** (`len(token) < 4`), so XTB and OKX can never fire: `xtbcopy.com` is missed.
+2. **A label equal to the brand is skipped as "possibly the brand itself"** with no check of the real domain, so `h5.bit-main.cc` (Bitmain with a hyphen and another TLD) is missed; `bitmain-ex` fires.
+3. **Brands in subdomains are ignored**: `tiktoksig-….a01.azurefd.net` is not checked because only the registrable label (`azurefd`) is.
+4. **False positive:** `brand_typosquat:binance` fires on `primesuccessfinance.com` and `bifinancegdb.vip` because "inance" inside "finance" is one edit from "binance". Both sites were counted as having a moderate signal in the earlier dead-site numbers, so "13 stay scam under (a)" included these two wrong ones.

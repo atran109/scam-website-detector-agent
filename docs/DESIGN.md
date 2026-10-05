@@ -361,6 +361,7 @@ class BlockedReason(StrEnum):            # NavigationTrace.blocked_at
     KYC = "kyc"
     GEO_BLOCK = "geo_block"
     PAYMENT_REQUIRED = "payment_required" # e.g. "deposit to activate account"
+    WALLET_REQUIRED = "wallet_required"   # needs a connected wallet; counted in the pilot to decide the mock wallet
     OTHER = "other"
 
 class EvidenceSource(StrEnum):           # what the verdict was based on (dead-site policy, §5.2a)
@@ -1018,8 +1019,11 @@ snapshot ─► patterns.py   finds candidates in: visible text, attributes, scr
 - Tool must be on the whitelist; arguments must be in range.
 - `goto` stays on the same registrable domain (no wandering off to other sites).
 - `fill` values: the LLM may only type placeholders or short literal strings. Placeholders resolve to the synthetic identity, so the model never invents personal data and can never type a real one.
-- Block "Confirm payment," "Withdraw," and wallet-connect actions that would sign anything (the mock wallet ensures nothing signs anyway).
-- Budgets: max steps, max seconds, and loop detection (same URL + same action 3 times → `NO_PROGRESS`).
+- **Deposit amounts (decided 2026-10-05).** In an amount field on a deposit/recharge page the model may type a number: the page's stated minimum, or 100 if none is stated. Entering an amount creates an order or reveals an address; it moves no money unless someone sends funds externally.
+- **Clicks on deposit pages.** "Confirm", "Next", "Recharge", "Submit order"-type clicks are allowed only when the page has no card or bank fields and no wallet signature request. Always blocked, on any page: "I have paid", "upload receipt / proof of payment", payment confirmation with card or bank details, anything that signs or approves, swaps, buys, or withdraws.
+- **Wallet.** Connect-wallet clicks are allowed only when the mock wallet is injected (it refuses to sign and logs requested recipients); sign/approve stay blocked even then. The mock wallet is deferred until after the M3 pilot: until it exists, connect-wallet clicks are blocked and a site that needs a wallet ends with `blocked_at: wallet_required`. Wallet-gated sites are tallied in the pilot, and the mock wallet is built if there are several.
+- **No tool call.** A model reply with text and no tool call counts as a failed step (toward `max_consecutive_failures`).
+- Budgets: max steps, max seconds, and loop detection (same URL + same action 3 times → `NO_PROGRESS`). A smaller step budget is considered for `fake_shop` sites (shops rarely have deposit flows).
 
 A rejected action is fed back to the model as a tool error, so it can choose something else.
 

@@ -136,6 +136,7 @@ class BlockedReason(StrEnum):  # NavigationTrace.blocked_at
     KYC = "kyc"
     GEO_BLOCK = "geo_block"
     PAYMENT_REQUIRED = "payment_required"  # e.g. "deposit to activate account"
+    WALLET_REQUIRED = "wallet_required"  # needs a connected wallet; mock wallet not built yet
     OTHER = "other"
 
 
