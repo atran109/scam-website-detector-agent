@@ -21,6 +21,10 @@ Crypto scam detection agent for the TRM Labs take-home. For each URL in `data/ur
 - Prefer plain, readable code over clever abstractions; this will be read by reviewers.
 - When unsure about a design choice, ask rather than guess.
 
+## Decision tracking
+- Every decision, whether approved in a dialog, sent by the user, or made on your own, gets a LOG.md entry with a short why and, where relevant, what was rejected. Tag entries [arch], [alt], [creative], [future] or [limit]. Changed decisions get a new entry that says which entry it supersedes.
+- At each milestone end: verify the LOG is complete, update DESIGN.md, update the README skeleton, then commit.
+
 ## Commands
 - `make selftest` — egress/isolation checks (must pass before real visits)
 - `make test` — unit tests

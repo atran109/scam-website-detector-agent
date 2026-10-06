@@ -2,6 +2,7 @@
 
 Append-only. Newest at the bottom. Never edit old entries; if I was wrong, add a new entry.
 Tags: `DECISION` · `FINDING` · `PROBLEM` · `RESULT` · `TODO-LATER`
+Category tags (from 2026-10-06, after the type tag): `[arch]` architecture · `[alt]` alternative considered/rejected · `[creative]` creative choice · `[future]` with more time · `[limit]` assumption or limitation. Entries before that date are tagged in the "tags" entry of 2026-10-06. A changed decision gets a new entry naming the entry it supersedes.
 Format: `## YYYY-MM-DD HH:MM · H+<hours since start> · TAG: short title`
 
 
@@ -451,3 +452,121 @@ Tokens per solvable run: about 69k–96k in (mostly cache reads), 1.6k–2.6k ou
 - **Spend:** $2.955 for the session per the gateway's usage log (618 calls, all Sonnet 5.5): $0.077 cache check, $2.70 for the 30 counted runs, $0.176 for one invite_required run whose scoring crashed (an empty expected-address set; fixed, tested, and that run was redone with `--resume`).
 - **API stall:** one request hung about 10 minutes until the SDK's 600 s timeout, then its retry succeeded in 4 s. TODO: a short per-request timeout for navigator calls at the gateway.
 - **Proposed fixes, NOT applied (they change the prompt and policy you reviewed):** (1) detect a CAPTCHA widget in code (`PageFacts`: reCAPTCHA/hCaptcha/Turnstile markup or "I'm not a robot"), refuse `click_at`/clicks on it with `blocked_at: captcha` like the wallet gate, and say in the prompt "a CAPTCHA is a gate: call done with blocked_at captcha; never try to solve it". (2) One history line per step instead of per action, with the last 12 steps kept. (3) Count a repeated page sequence (the same URLs in the same order) as no progress, and use the last gate as the fallback `blocked_at` there too. Then rerun the four gated variants ×3 (about $1.50).
+
+## 2026-10-06 20:00 · H+? · DECISION [arch]: decision tracking rule (user)
+- CLAUDE.md now requires a LOG entry for every decision (approved, user-sent or my own) with a short why and what was rejected, category tags, supersede notes, and a milestone-end routine: verify the LOG, update DESIGN and the README skeleton, commit.
+- Why: the README is written from this log; decisions that only lived in commit messages or inside RESULT bullets were easy to lose. The entries below backfill those gaps, checked against `git log` from `7fa6413` to `43f1797`.
+
+## 2026-10-06 20:00 · H+? · DECISION [arch] (backfill, M2 step 2, `27db3ef`): what a capture saves
+- Each snapshot saves the HTML and visible text of all frames, an aria snapshot, a full-page screenshot, QR decodes and text network bodies under size caps. `load_snapshot_content()` is the only read path, for both live extraction and rescore. Why: a rescore must see exactly what the live run saw.
+- The browser UA matches the real engine (no "HeadlessChrome") with a fixed locale. Why: scam kits cloak against headless markers. Popups are closed on open (their URL stays in the trace). Why: no tab sprawl, and no second page to police.
+- Browser tests run in a `network_mode: none` container with the same seccomp sandbox. Why: tests can never touch the network.
+- Rejected: re-fetching pages for rescore (not reproducible, revisits hostile sites).
+
+## 2026-10-06 20:00 · H+? · DECISION [arch] (backfill, M2 step 4, `770000c`): per-site pipeline choices
+- An empty desktop render is retried once with a mobile viewport. Why: A8, many scam SPAs render only for phones.
+- `tls_error`/`timeout` sites get one Chromium recheck before being called dead. Why: Python's TLS fingerprint may be cloaked against.
+- One checkpoint line per site plus `--resume`. A site timeout or exception becomes an error record. Why: the "exactly one record per URL" contract has to hold even when a site crashes the pipeline.
+- Cross-site sibling pass after the batch. Why: sibling domains likely share operators (URL-profile finding, 2026-10-03), so a live scam's evidence can inform a dead sibling.
+- Rejected: one long browser session for all sites (state would leak across sites).
+
+## 2026-10-06 20:00 · H+? · DECISION [arch][alt] (backfill, step C): tool scalars map onto `AgentAction.value`
+- Supersedes the TODO-LATER of 2026-10-04 18:11, which preferred typed fields. `select` option, `press` key, `scroll` direction and `wait` seconds go into `value`; `done`'s `blocked_at` travels in `ParsedCall`, not in `AgentAction`.
+- Why: the output contract (`AgentStep.action`) stays unchanged, and `tools.py` already validates each argument's type and range before an `AgentAction` exists.
+- Rejected: typed fields on `AgentAction` (a schema change for no safety gain).
+
+## 2026-10-06 20:00 · H+? · DECISION [arch] (backfill): why withdraw, "I have paid", "Confirm payment", receipts and sign/approve are always blocked
+- They are blocked on every page, even with a future mock wallet. Revealing a deposit address never needs any of them: the address shows before payment.
+- "I have paid", "Confirm payment" and receipt upload would assert a payment that never happened. That creates a false record, can trigger scammer follow-up (chat, pressure, "verification fee"), and a receipt upload would mean sending a fabricated document.
+- Withdraw/transfer/swap/buy would submit an order or address into a money flow under our synthetic identity. Sign/approve could grant token allowances.
+- CLAUDE.md hard rule: never pay or sign. Enforced in `policy.py` (code), not in the prompt.
+- Rejected: allowing "Confirm" generically. It is allowed only as a deposit submit on a deposit page with no card/bank fields and no signature request; "Confirm payment" is not (decided 2026-10-06).
+
+## 2026-10-06 20:00 · H+? · DECISION [arch][alt] (backfill, user 2026-10-06): batching rule
+- A reply may carry several `fill`/`select` calls plus one final other action. Each is policy-checked in order; the batch stops at the first refusal or failure; a step is one reply. Later calls are reported back as "not run" (prompt review before step E).
+- Why: a registration form took 7 single-action steps; with batching it takes 2. Fewer model calls also cost less.
+- Rejected: one action per reply (normal needed 19+ steps, and amount_first about 32 against a 20-step gate). Also rejected: batching clicks, because the page re-renders and element ids go stale.
+
+## 2026-10-06 20:00 · H+? · DECISION [arch] (backfill, step D): gate refusals go back to the model
+- A policy refusal that names a gate (`wallet_required`, `kyc`, `payment_required`) is returned as a tool error; the loop keeps running. If the run then ends without a deposit address, the last gate hit becomes `blocked_at`.
+- Supersedes the step C note (2026-10-05 13:00) that the gate should stop the loop.
+- Why: the mock (and real kits) show a "Connect Wallet" button in the header of every page; one stray click would end a solvable run.
+- Rejected: stopping on the first gate refusal.
+
+## 2026-10-06 20:00 · H+? · DECISION [arch] (backfill, 2026-10-06): cross-domain link rule
+- A click on a link whose `href` is on another registrable domain is refused, like `goto`. A click that still ends off-site (script navigation) is undone with `back` and counts as a failed step.
+- Why: `goto` was domain-checked but link clicks were not. The injection variant's "Claim bonus" link was stopped only by the mock's loopback guard; on a real site the click would have left.
+- Rejected: relying on the network guard (real runs have internet access through the proxy).
+- Extended by the linked_domains entry below.
+
+## 2026-10-06 20:00 · H+? · DECISION [arch][alt] (backfill, 2026-10-06): `StopReason.BUDGET_TOKENS`
+- Hard per-site caps of 250k input and 25k output tokens, checked in code before each model call (the next call is estimated from the previous one). Worst case $0.75 per site on Sonnet 5.5.
+- Why: step and time budgets do not bound spend; long thinking or large pages can blow the budget within the step limit.
+- Rejected: reusing `BUDGET_STEPS` (would make the reports misleading).
+
+## 2026-10-06 20:00 · H+? · DECISION [arch][limit] (backfill, steps D–E): loop heuristics and evaluation mechanics
+- `logged_in` = a password was submitted and a later page has no password field plus an account marker (balance, logout, …) or is a deposit page. `registered` additionally needs a confirm-password field. Why: there is no generic session signal; this one is cheap and wrong only in the direction of "not logged in".
+- Coverage counts primary addresses by labels with confidence ≥ 0.6. Why: a 0x address on a USDT-ERC20 page also gets a weak ETH label, which must not mark ETH as done.
+- `done` without `blocked_at` and nothing found → `not_applicable`.
+- Navigator request: one self-contained request per step (system + tools cached, screenshot, page, last 12 history lines). Rejected: a growing multi-turn tool conversation (token cost grows with every step, and edited history breaks thinking/caching). Other settings: effort `medium`, `tool_choice: auto` (forced use returns a 400 on Sonnet 5.5), mobile viewport for the H5-style mock.
+- Evaluation: the gateway response cache is off (`cache: false`) so repeats are independent. Runs go round-robin, and the spend cap refuses a run that could cross it (spent plus the $0.75 worst case). `--resume` after the scoring crash, so no run is paid for twice.
+- Step-E gate (user): a correct address within 20 steps AND 6/6 within 35. Rejected: 6/6 within 20 (amount_first needs about 21–32 steps by construction).
+
+## 2026-10-06 20:00 · H+? · DECISION [limit] (backfill): CAPTCHA handling through step E
+- No code rule existed. The prompt listed `captcha` as a gate, and CLAUDE.md forbids solving CAPTCHAs via services. The model treated the reCAPTCHA checkbox as clickable and clicked it 7–10 times; only 1 of 3 runs ended `blocked_at: captcha`. Superseded by the CAPTCHA policy entry below.
+
+## 2026-10-06 20:00 · H+? · DECISION [arch]: tags for entries before 2026-10-06 (old entries are not edited)
+| entry (date · title) | tags |
+|---|---|
+| 10-03 scam definition | [arch][limit] |
+| 10-03 custom Playwright + Claude loop | [arch][alt] |
+| 10-03 Claude sandbox cannot reach the sites | [limit] |
+| 10-03 URL list profile | [limit] |
+| 10-03 logging and planning setup | [arch][alt] |
+| 10-03 design doc written | [arch] |
+| 10-04 several asset/network labels per address | [arch][creative] |
+| 10-04 Stagehand v4 research | [alt] |
+| 10-04 Stagehand deferred; element finding behind an interface | [alt][future] |
+| 10-04 non-semantic widgets handled explicitly | [arch][creative] |
+| 10-04 Playwright tracing instead of Browserbase | [alt] |
+| 10-04 plan merged with my own draft | [arch] |
+| 10-04 hardened Docker on my Mac | [arch][alt][limit] |
+| 10-04 egress proxy container | [arch][alt] |
+| 10-04 capture and classification separate | [arch][creative] |
+| 10-04 run-location trade-off | [alt][limit][future] |
+| 10-04 output contract and address policy | [arch] |
+| 10-04 verdict bias, models, per-site limits | [arch][limit] |
+| 10-04 repo contents and schedule freezes | [arch] |
+| 10-04 deadline flexible; API key | [limit] |
+| 10-04 18:11 repo skeleton and DESIGN/PLAN fixes | [arch] |
+| 10-04 18:11 TODO AgentAction arguments | [future] (superseded, see 2026-10-06 backfill) |
+| 10-04 18:58 M1 sandbox, proxy, triage design | [arch][creative] |
+| 10-04 18:58 selftest 30/30 | [arch] |
+| 10-04 19:22 first triage | [limit] |
+| 10-04 19:40 dead-site verdict policy | [arch][limit] |
+| 10-04 20:30 M2 step 1 extraction details | [arch][creative] |
+| 10-04 21:30 classification v1 and gateway | [arch][creative] |
+| 10-05 01:30 M2 gate pilot-5 | [limit][future] |
+| 10-05 02:10 review page | [creative] |
+| 10-05 03:20 content signals (fix 1) | [arch] |
+| 10-05 03:50 parked pages (fix 2) | [arch][limit] |
+| 10-05 04:20 drop labelled contracts (fix 3) | [arch][creative] |
+| 10-05 05:10 random-looking domain (fix 4) | [creative][limit] |
+| 10-05 05:10 pilot-5 rescore | [limit] |
+| 10-05 06:00 dead-site weak signals | [limit][future] |
+| 10-05 06:00 the 30 random-looking domains | [limit] |
+| 10-05 06:00 TODO M4 additions | [future] |
+| 10-05 06:40 finance words dropped for dead sites | [arch][limit] |
+| 10-05 07:00 M3 decisions from plan review | [arch] |
+| 10-05 07:00 brand-list sweep | [limit] |
+| 10-05 08:30 route guard misses redirects | [arch][limit] |
+| 10-05 08:30 step A mock exchange | [arch][creative] |
+| 10-05 09:00 brand candidate list | [limit] |
+| 10-05 10:00 brand rule rewritten | [arch][limit] |
+| 10-05 10:20 dead-site recount | [limit] |
+| 10-05 11:30 step B elements/observation | [arch][limit] |
+| 10-05 13:00 step C policy/tools/identity | [arch] |
+| 10-06 17:25 approved policy decisions | [arch] |
+| 10-06 17:25 step D loop | [arch] |
+| 10-06 18:10 selftest waiver (mock only) | [arch][limit] |
+| 10-06 19:40 step E results | [limit][future] |
