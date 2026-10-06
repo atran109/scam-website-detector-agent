@@ -92,7 +92,9 @@ def load_brands(path: Path = REPO_ROOT / "config" / "brands.yaml") -> list[Brand
         if isinstance(entry, str):
             entry = {"name": entry, "tokens": [_token(p) for p in entry.split("/")]}
         for token in entry["tokens"]:
-            mode = entry.get("match") or ("substring" if len(token) >= MIN_SUBSTRING_LEN else "anchored")
+            mode = entry.get("match") or (
+                "substring" if len(token) >= MIN_SUBSTRING_LEN else "anchored"
+            )
             fuzzy = entry.get("fuzzy", True) and len(token) >= MIN_FUZZY_LEN
             own = token in {_token(p) for p in entry["name"].split("/")}
             out.append(BrandToken(entry["name"], token, mode, fuzzy, own))
