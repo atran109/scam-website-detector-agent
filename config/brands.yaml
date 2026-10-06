@@ -36,7 +36,9 @@ brands:
   - "Bitkan"
   - "Bitfinex/BFX"
   - "ZFX"
-  - "Interactive Brokers"
+  - name: "Interactive Brokers"
+    tokens: [interactivebrokers]
+    all_words: [interactive, brokers]  # "interactivemining-brokers": the words are split apart
   - "Tatung"
   - name: "POIZON"
     tokens: [poizon, poizvip]  # poizvip is a manual alias: the site says POIZON, the domain does not

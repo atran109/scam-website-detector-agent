@@ -67,9 +67,10 @@ class BrandToken:
 
     brand: str
     token: str
-    mode: str  # "substring" | "anchored" | "exact", see _plain_match
+    mode: str  # "substring" | "anchored" | "exact" | "all_words", see _plain_match
     fuzzy: bool
     own_name: bool  # the brand's real name; an alias or known lookalike is never "the real site"
+    words: tuple[str, ...] = ()  # all_words mode: each word must start or end a name part
 
 
 MIN_SUBSTRING_LEN = 5  # shorter tokens ("okx", "gate") must sit at an edge of a name part
@@ -86,7 +87,9 @@ def _token(name: str) -> str:
 
 
 def load_brands(path: Path = REPO_ROOT / "config" / "brands.yaml") -> list[BrandToken]:
-    """Entries are "Name/alias" strings or mappings {name, tokens, match, fuzzy}."""
+    """Entries are "Name/alias" strings or mappings {name, tokens, match, fuzzy, all_words}.
+    `all_words` adds one more token that matches when every listed word starts or ends a
+    hyphen-separated part of the same label, in any order ("interactivemining-brokers")."""
     out: list[BrandToken] = []
     for entry in yaml.safe_load(path.read_text())["brands"]:
         if isinstance(entry, str):
@@ -98,6 +101,8 @@ def load_brands(path: Path = REPO_ROOT / "config" / "brands.yaml") -> list[Brand
             fuzzy = entry.get("fuzzy", True) and len(token) >= MIN_FUZZY_LEN
             own = token in {_token(p) for p in entry["name"].split("/")}
             out.append(BrandToken(entry["name"], token, mode, fuzzy, own))
+        if words := tuple(_token(w) for w in entry.get("all_words", [])):
+            out.append(BrandToken(entry["name"], "+".join(words), "all_words", False, False, words))
     return out
 
 
@@ -128,6 +133,12 @@ def _plain_match(token: BrandToken, joined: str, parts: list[str]) -> bool:
         return token.token in joined
     if token.mode == "anchored":  # at the start or end of a hyphen-separated part
         return any(p.startswith(token.token) or p.endswith(token.token) for p in parts)
+    if token.mode == "all_words":  # words split across parts; one part is the plain token's job
+        homes = [
+            {i for i, p in enumerate(parts) if p.startswith(w) or p.endswith(w)}
+            for w in token.words
+        ]
+        return all(homes) and len(set.union(*homes)) > 1
     return any(p.strip("0123456789") == token.token for p in parts)  # exact: the whole part
 
 

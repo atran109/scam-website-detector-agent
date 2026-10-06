@@ -38,6 +38,9 @@ def brand_names(host: str) -> set[str]:
         ("h5.bitxex.quest", "brand_in_domain:bitxex"),
         ("binance.workers.dev", "brand_in_domain:binance"),  # subdomain is the site name
         ("login.binance.example.com", "brand_in_domain:binance"),  # any label counts
+        # all-words rule: both words at the edge of name parts, split apart (#048)
+        ("interactivemining-brokers.com", "brand_in_domain:interactive+brokers"),
+        ("brokers-interactive.top", "brand_in_domain:interactive+brokers"),
     ],
 )
 def test_detected(host: str, expected: str) -> None:
@@ -63,6 +66,9 @@ def test_detected(host: str, expected: str) -> None:
         "oxford.com",
         "bitmex.com",  # BitMEX lists only the lookalike "bitxex", no fuzzy
         "bitmax.com",
+        "interactive-media.com",  # only one of the all-words words
+        "brokers-online.com",
+        "interactivebrokers.com",  # the real name in one part: the plain token's own-name rule
         # brand names on their own real-looking domains
         "binance.com",
         "www.coinbase.com",
