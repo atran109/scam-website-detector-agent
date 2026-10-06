@@ -4,8 +4,12 @@ Mock mode runs inside the crawler container, which has no route out, with a brow
 proxy and may only reach loopback (config.require_loopback_url, sandbox.restrict_to_loopback)."""
 
 import importlib.util
+import json
+import logging
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -19,8 +23,10 @@ from scamhunter.agent.policy import Policy, registrable
 from scamhunter.browser.sandbox import launch_mock_browser, new_context
 from scamhunter.config import REPO_ROOT, load_settings, require_loopback_url
 from scamhunter.extract.blocklist import load_blocklist
+from scamhunter.llm.client import PRICES_PER_MTOK
 from scamhunter.models import AddressTier, BlockedReason
 
+log = logging.getLogger(__name__)
 EXCHANGE_DIR = REPO_ROOT / "tests" / "fixtures" / "mock_exchange"
 
 
@@ -96,8 +102,8 @@ class MockRun:
 
     @property
     def full_coverage_step(self) -> int | None:
-        if len(self.found_turn) < len(self.expected):
-            return None
+        if not self.expected or len(self.found_turn) < len(self.expected):
+            return None  # no account (gated variants), or not every asset found
         return max(self.found_turn.values())
 
     @property
@@ -159,13 +165,14 @@ def exchange_assets() -> list[tuple[str, str]]:
 
 async def run_on_mock(
     variant: str,
-    decider: Decider,
+    make_decider: Callable[[Policy], Decider],
     run_dir: Path,
     limits: AgentLimits,
     goal: str,
 ) -> MockRun:
     """One agent run against a fresh mock exchange, in a loopback-only browser with a phone
-    viewport (the mock is an H5-style site). Evidence goes to `run_dir/sites/mock-<variant>`."""
+    viewport (the mock is an H5-style site). Evidence goes to `run_dir/sites/mock-<variant>`.
+    The decider is built from the run's policy, so a prompt can state the same rules."""
     module = load_exchange_module()
     exchange = module.MockExchange(variant=variant)
     base = require_loopback_url(exchange.start())
@@ -180,10 +187,11 @@ async def run_on_mock(
             )
             page = await context.new_page()
             await page.goto(base, wait_until="domcontentloaded")
+            policy = Policy(registrable(urlparse(base).hostname or ""), identity)
             loop = NavigationLoop(
                 page=page,
-                decider=decider,
-                policy=Policy(registrable(urlparse(base).hostname or ""), identity),
+                decider=make_decider(policy),
+                policy=policy,
                 limits=limits,
                 evidence=Evidence(page, site_dir, run_dir, load_blocklist()),
                 goal=goal,
@@ -198,3 +206,107 @@ async def run_on_mock(
         exchange.stop()
     (site_dir / "agent_trace.json").write_text(run.trace.model_dump_json(indent=2))
     return score(variant, run, exchange, identity.email, blocked)
+
+
+# ---------- step E: the real navigator against every variant ----------
+
+
+def worst_case_cost(limits: AgentLimits, model: str) -> float:
+    """The most one run can spend: every input token fresh, both caps reached."""
+    price_in, price_out = PRICES_PER_MTOK[model]
+    return (limits.max_tokens_in * price_in + limits.max_tokens_out * price_out) / 1_000_000
+
+
+def run_summary(result: MockRun, model: str) -> dict[str, Any]:
+    run = result.run
+    return {
+        "variant": result.variant,
+        "passed": result.passed,
+        "steps": run.turns,
+        "first_correct_step": result.first_correct_step,
+        "found": f"{len(result.found_turn)}/{len(result.expected) or 6}",
+        "full_coverage_step": result.full_coverage_step,
+        "stop_reason": run.trace.stop_reason.value,
+        "blocked_at": run.trace.blocked_at.value if run.trace.blocked_at else None,
+        "expected_blocked_at": result.expected_gate.value if result.expected_gate else None,
+        "tokens_in": run.usage.tokens_in,
+        "tokens_out": run.usage.tokens_out,
+        "cache_read_tokens": run.usage.cache_read_tokens,
+        "cache_read_by_step": [u.get("cache_read_input_tokens", 0) for u in run.call_usage],
+        "cost_usd": round(run.usage.cost_usd(model), 4),
+        "seconds": round(run.seconds, 1),
+        "refusals": [f"step {r.turn}: {r.action} → {r.reason}" for r in run.refusals],
+        "forbidden": result.forbidden,
+        "blocked_urls": result.blocked_urls,
+        "wrong_primary": result.wrong_primary,
+    }
+
+
+async def evaluate_navigator(
+    decider_for: Callable[[str, Policy], Decider],  # (run name, policy) -> Decider
+    variants: list[str],
+    repeat: int,
+    run_dir: Path,
+    limits: AgentLimits,
+    goal: str,
+    model: str,
+    spend_cap_usd: float,
+    resume: bool = False,
+) -> list[dict[str, Any]]:
+    """Run each variant `repeat` times, round-robin (so a spend-cap stop leaves every variant
+    with the same number of runs), and stop starting runs once the next one could cross the
+    cap. Writes summary.json after every run. With `resume`, runs already in summary.json are
+    kept (and their cost counted) instead of being run again."""
+    out_dir = run_dir / "agent_mock"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
+    summary_path = out_dir / "summary.json"
+    if resume and summary_path.exists():
+        rows = json.loads(summary_path.read_text())["runs"]
+    done = {r["run"] for r in rows}
+    spent = sum(r["cost_usd"] for r in rows)
+    worst = worst_case_cost(limits, model)
+    for round_no in range(1, repeat + 1):
+        for variant in variants:
+            if spent + worst > spend_cap_usd:
+                log.warning("spend cap: $%.2f spent, next run could cost $%.2f", spent, worst)
+                _write_summary(out_dir, rows, spent, spend_cap_usd, stopped_by_cap=True)
+                return rows
+            name = f"{variant}-{round_no}"
+            if name in done:
+                continue
+            result = await run_on_mock(
+                variant, partial(decider_for, name), out_dir / name, limits, goal
+            )
+            row = run_summary(result, model) | {"run": name}
+            spent += row["cost_usd"]
+            rows.append(row)
+            log.info(
+                "%s: %s, %d steps, found %s, $%.3f (total $%.2f)",
+                name,
+                "PASS" if row["passed"] else "FAIL",
+                row["steps"],
+                row["found"],
+                row["cost_usd"],
+                spent,
+            )
+            _write_summary(out_dir, rows, spent, spend_cap_usd, stopped_by_cap=False)
+    return rows
+
+
+def _write_summary(
+    out_dir: Path, rows: list[dict[str, Any]], spent: float, cap: float, stopped_by_cap: bool
+) -> None:
+    solvable = [r for r in rows if r["expected_blocked_at"] is None]
+    summary = {
+        "spent_usd": round(spent, 4),
+        "spend_cap_usd": cap,
+        "stopped_by_spend_cap": stopped_by_cap,
+        "solvable_pass_rate": (
+            sum(r["passed"] for r in solvable) / len(solvable) if solvable else None
+        ),
+        "gated_all_correct": all(r["passed"] for r in rows if r["expected_blocked_at"]),
+        "injection_refusals": sum(len(r["refusals"]) for r in rows if r["variant"] == "injection"),
+        "runs": rows,
+    }
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))

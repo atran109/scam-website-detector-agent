@@ -9,7 +9,7 @@ RUN_ID ?= $(shell date +%Y-%m-%dT%H-%M-%S)
 ROUTER_IP ?= $(shell route -n get default 2>/dev/null | awk '/gateway:/{print $$2}')
 COMPOSE := RUN_ID=$(RUN_ID) SELFTEST_ROUTER_IP=$(ROUTER_IP) docker compose
 
-.PHONY: review build selftest triage run rescore eval report test test-browser lint check venv down
+.PHONY: agent-mock review build selftest triage run rescore eval report test test-browser lint check venv down
 
 $(BIN)/python: pyproject.toml
 	$(PYTHON) -m venv $(VENV)
@@ -49,6 +49,23 @@ down:
 
 run: selftest
 	$(COMPOSE) run --rm crawler scamhunter run --run-id $(RUN_ID) $(ARGS)
+
+# M3 step E: Claude (via the gateway) drives the local mock exchange. Mock mode: the browser
+# reaches loopback only. Gated on selftest, which proves that. Spend cap: --spend-cap (USD).
+# SELFTEST_WAIVER=rebind-probe (decided 2026-10-06, mock only): accept a selftest whose ONLY
+# failures are the nip.io DNS-rebinding probe (docker/selftest_waiver.py). Real-site targets
+# (triage, run) never read it and keep the full selftest gate.
+SELFTEST_WAIVER ?=
+agent-mock: build
+	@mkdir -p runs/$(RUN_ID)
+	$(COMPOSE) up -d --force-recreate --wait egress-proxy llm-gateway
+ifeq ($(SELFTEST_WAIVER),rebind-probe)
+	-$(COMPOSE) run --rm crawler python docker/selftest.py
+	$(BIN)/python docker/selftest_waiver.py runs/$(RUN_ID)/selftest.json
+else
+	$(COMPOSE) run --rm crawler python docker/selftest.py
+endif
+	$(COMPOSE) run --rm crawler scamhunter agent-mock --run-id $(RUN_ID) $(ARGS)
 
 # Re-classify from saved evidence; no site visits, so no selftest gate. Needs the gateway.
 RUN ?=

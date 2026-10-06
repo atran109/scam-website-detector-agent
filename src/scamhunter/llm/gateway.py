@@ -52,6 +52,7 @@ class GatewayRequest(_Strict):
     site_id: str
     purpose: str
     request: MessagesRequest
+    cache: bool = True  # False: skip the response cache (independent repeats in evaluation)
 
 
 def validate_request(body: dict[str, Any]) -> GatewayRequest:
@@ -108,7 +109,8 @@ class Gateway:
         model = self.models[req.role]
         key = cache_key(model, req.request)
         cached_path = self.cache_dir / f"{key}.json"
-        if self.cache_enabled and cached_path.exists():
+        use_cache = self.cache_enabled and req.cache
+        if use_cache and cached_path.exists():
             result = json.loads(cached_path.read_text())
             self._log_usage(req, model, result["usage"], cached=True)
             return {**result, "cached": True}
@@ -134,7 +136,7 @@ class Gateway:
             "request_id": response._request_id,
         }
         # Refusals aren't cached: a later run may get through (or route via fallback).
-        if self.cache_enabled and response.stop_reason != "refusal":
+        if use_cache and response.stop_reason != "refusal":
             cached_path.write_text(json.dumps(result))
         self._log_usage(req, model, result["usage"], cached=False)
         return {**result, "cached": False}

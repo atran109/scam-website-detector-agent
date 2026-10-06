@@ -106,6 +106,62 @@ def cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent_mock(args: argparse.Namespace) -> int:
+    """M3 step E: the real navigator (Claude via the gateway) against the local mock exchange.
+    Mock mode only: the browser can reach loopback and nothing else (DESIGN §5.6.0)."""
+    import logging
+
+    from scamhunter.agent.loop import AgentLimits, ClaudeDecider
+    from scamhunter.agent.prompts import GOAL, system_prompt
+    from scamhunter.llm.client import LLMClient
+    from scamhunter.mock_mode import GATED_VARIANTS, SOLVABLE_VARIANTS, evaluate_navigator
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    settings = load_settings()
+    all_variants = [*SOLVABLE_VARIANTS, *GATED_VARIANTS]
+    variants = all_variants if args.variants == "all" else args.variants.split(",")
+    if unknown := set(variants) - set(all_variants):
+        print(f"unknown variants: {sorted(unknown)}")
+        return 1
+    limits = AgentLimits.from_settings(
+        settings.agent, max_steps=args.max_steps, max_seconds=args.max_seconds
+    )
+    out = run_dir(args.run_id or new_run_id())
+
+    async def go() -> list[dict]:
+        llm = LLMClient(settings.llm.gateway_url)
+        try:
+            return await evaluate_navigator(
+                lambda name, policy: ClaudeDecider(
+                    llm,
+                    f"mock-{name}",
+                    system_prompt(policy.mock_wallet_active),  # prompt and policy agree
+                    response_cache=False,
+                ),
+                variants,
+                args.repeat,
+                out,
+                limits,
+                GOAL,
+                settings.llm.navigator_model,
+                args.spend_cap,
+                resume=args.resume,
+            )
+        finally:
+            await llm.aclose()
+
+    rows = asyncio.run(go())
+    print(f"\n{out / 'agent_mock' / 'summary.json'}")
+    for row in rows:
+        print(
+            f"  {row['run']:<20} {'PASS' if row['passed'] else 'FAIL'}  steps {row['steps']:>2}"
+            f"  first {row['first_correct_step']}  {row['found']}  full {row['full_coverage_step']}"
+            f"  blocked_at {row['blocked_at']}  ${row['cost_usd']:.3f}"
+            f"  refusals {len(row['refusals'])}"
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="scamhunter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -127,6 +183,14 @@ def main(argv: list[str] | None = None) -> int:
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--run-id", required=True)
+    mock = sub.add_parser("agent-mock", help="navigator vs the local mock exchange (M3 step E)")
+    mock.add_argument("--run-id", help="run directory name (default: timestamp)")
+    mock.add_argument("--variants", default="all", help="comma-separated, or 'all'")
+    mock.add_argument("--repeat", type=int, default=3)
+    mock.add_argument("--spend-cap", type=float, default=10.0, help="USD for the whole session")
+    mock.add_argument("--max-steps", type=int, default=35)
+    mock.add_argument("--max-seconds", type=int, default=600)
+    mock.add_argument("--resume", action="store_true", help="keep runs already in summary.json")
     review = sub.add_parser("review", help="read-only HTML review page from saved evidence")
     review.add_argument("--run-id", required=True)
     sub.add_parser("eval", help="not implemented yet (M4)")
@@ -138,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         "rescore": cmd_rescore,
         "report": cmd_report,
         "review": cmd_review,
+        "agent-mock": cmd_agent_mock,
     }
     if args.command in handlers:
         return handlers[args.command](args)

@@ -23,13 +23,14 @@ from playwright.async_api import Page
 
 from scamhunter.agent.identity import MailMessage, describe_message, resolve_placeholders
 from scamhunter.agent.policy import LoopDetector, Policy, registrable
-from scamhunter.agent.tools import ParsedCall, ToolError, pick_tool_calls
+from scamhunter.agent.tools import TOOLS, ParsedCall, ToolError, calls_after, pick_tool_calls
 from scamhunter.browser.capture import NetworkRecorder, load_snapshot_content, take_snapshot
 from scamhunter.browser.elements import ActionResult, perform
 from scamhunter.browser.page_state import Coverage, PageState, labelled_deposit_page, observe
 from scamhunter.config import AgentSettings
 from scamhunter.extract.extractor import extract, merge_all
-from scamhunter.llm.client import TokenUsage
+from scamhunter.llm.client import LLMClient, LLMError, TokenUsage
+from scamhunter.llm.sanitize import untrusted
 from scamhunter.models import (
     ActionType,
     AddressTier,
@@ -80,6 +81,7 @@ class StepView:
     state: PageState
     history: list[str]  # recent actions and their results, oldest first
     turn: int
+    max_steps: int
 
 
 @dataclass
@@ -134,6 +136,7 @@ class AgentRun:
     first_address_turn: int | None  # step at which the first deposit address appeared
     full_coverage_turn: int | None  # step at which every target asset had an address
     seconds: float
+    call_usage: list[dict[str, int]] = field(default_factory=list)  # API usage per step
 
 
 def asset_keys(address: CryptoAddress) -> set[str]:
@@ -259,6 +262,7 @@ class NavigationLoop:
         self.reached_deposit = False
         self.first_address_turn: int | None = None
         self.full_coverage_turn: int | None = None
+        self.call_usage: list[dict[str, int]] = []
         self._turns = 0
         self._started = 0.0
         self._last_call_tokens_in = 0
@@ -302,6 +306,7 @@ class NavigationLoop:
             first_address_turn=self.first_address_turn,
             full_coverage_turn=self.full_coverage_turn,
             seconds=time.monotonic() - self._started,
+            call_usage=self.call_usage,
         )
 
     # ---------- the loop ----------
@@ -315,13 +320,16 @@ class NavigationLoop:
                 return StopReason.BUDGET_TOKENS, None
             self._turns = turn
             state = await self._observe(turn)
-            reply = await self.decider.decide(StepView(self.goal, state, self._recent(), turn))
+            view = StepView(self.goal, state, self._recent(), turn, self.limits.max_steps)
+            reply = await self.decider.decide(view)
             self.usage.add(reply.usage, reply.cached)
+            self.call_usage.append(dict(reply.usage))
             self._last_call_tokens_in = sum(
                 reply.usage.get(k, 0)
                 for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
             )
-            outcome = await self._run_batch(turn, state, pick_tool_calls(reply.content), reply)
+            batch = pick_tool_calls(reply.content)
+            outcome = await self._run_batch(turn, state, batch, calls_after(reply.content, batch))
             if isinstance(outcome, tuple):
                 return outcome
             failures = 0 if outcome else failures + 1
@@ -335,15 +343,18 @@ class NavigationLoop:
         turn: int,
         state: PageState,
         batch: list[ParsedCall | ToolError],
-        reply: Reply,
+        dropped: list[str],
     ) -> bool | tuple[StopReason, BlockedReason | None]:
         """Run one reply's calls. True if at least one action ran, False if the step failed,
-        or a (stop reason, blocked_at) pair to end the run."""
+        or a (stop reason, blocked_at) pair to end the run. `dropped` are calls after the batch
+        ended; they and any batch calls skipped after a refusal are reported as not run."""
         tokens = (self.usage.tokens_in, self.usage.tokens_out)
         ran_any = False
         new_addresses: list[str] = []
         recorded_from = len(self.steps)
+        finished = 0  # batch calls handled (run, refused or failed)
         for call in batch:
+            finished += 1
             if isinstance(call, ToolError):
                 self.history.append(f"{turn}. ERROR: {call.message}")
                 break
@@ -371,6 +382,12 @@ class NavigationLoop:
             if self.loop_detector.record(state.url, action):
                 self.history.append(f"{turn}. stopping: the same action keeps repeating")
                 return StopReason.NO_PROGRESS, None
+        skipped = [
+            describe_action(c.action, state) if isinstance(c, ParsedCall) else "malformed call"
+            for c in batch[finished:]
+        ]
+        if not_run := skipped + dropped:
+            self.history.append(f"{turn}. not run: " + "; ".join(not_run))
         if ran_any:
             stage = self._base_stage()
             if await labelled_deposit_page(self.page):
@@ -553,3 +570,92 @@ class ScriptedDecider:
             for i, (name, args) in enumerate(planned)
         ]
         return Reply(content)
+
+
+# ---------- Claude through the gateway ----------
+
+NAVIGATOR_MAX_TOKENS = 4000
+NAVIGATOR_EFFORT = "medium"
+
+
+def render_view(view: StepView) -> str:
+    """The text of one step's user message. The recent-actions block quotes element names and
+    mail from the page, so it is an untrusted block like the page itself."""
+    history = "\n".join(view.history) or "(none yet)"
+    return "\n".join(
+        [
+            f"Goal: {view.goal}",
+            f"Step {view.turn} of {view.max_steps} ({view.max_steps - view.turn} left after this).",
+            "Your recent actions and their results (element names come from the page):",
+            untrusted("recent_actions", history, 4000),
+            view.state.render(),
+        ]
+    )
+
+
+class ClaudeDecider:
+    """One gateway call per step: a fresh single-turn request with the system prompt and tools
+    (prompt-cached), the current observation and a compact history. Keeping each request
+    self-contained bounds its size; the history carries what the model needs from earlier."""
+
+    def __init__(
+        self,
+        llm: LLMClient,
+        site_id: str,
+        system_prompt: str,
+        response_cache: bool = True,
+    ) -> None:
+        self.llm = llm
+        self.site_id = site_id
+        self.system_prompt = system_prompt
+        self.response_cache = response_cache
+
+    def request(self, view: StepView) -> dict[str, Any]:
+        content: list[dict[str, Any]] = []
+        if screenshot := view.state.screenshot_b64():
+            content.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": screenshot},
+                }
+            )
+        content.append({"type": "text", "text": render_view(view)})
+        return {
+            "system": [
+                {
+                    "type": "text",
+                    "text": self.system_prompt,
+                    "cache_control": {"type": "ephemeral"},  # covers tools + system
+                }
+            ],
+            "tools": TOOLS,
+            "tool_choice": {"type": "auto"},  # forced tool use is a 400 on this model family
+            "messages": [{"role": "user", "content": content}],
+            "max_tokens": NAVIGATOR_MAX_TOKENS,
+            "output_config": {"effort": NAVIGATOR_EFFORT},
+        }
+
+    async def decide(self, view: StepView) -> Reply:
+        try:
+            response = await self.llm.call(
+                "navigator",
+                self.site_id,
+                f"navigate:{view.turn}",
+                self.request(view),
+                TokenUsage(),  # the loop counts usage from the Reply
+                cache=self.response_cache,
+            )
+        except LLMError as exc:  # gateway down, refusal: a failed step, not a crash
+            log.warning("navigator call failed: %s", exc)
+            return Reply([{"type": "text", "text": f"(navigator call failed: {exc})"}])
+        u = response.usage
+        log.info(
+            "%s step %d: in %d (cache read %d, write %d), out %d",
+            self.site_id,
+            view.turn,
+            u.get("input_tokens", 0),
+            u.get("cache_read_input_tokens", 0),
+            u.get("cache_creation_input_tokens", 0),
+            u.get("output_tokens", 0),
+        )
+        return Reply(response.content, response.usage, response.cached)

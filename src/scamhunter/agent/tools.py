@@ -199,3 +199,15 @@ def pick_tool_calls(content: list[dict[str, Any]]) -> list[ParsedCall | ToolErro
         if isinstance(call, ToolError) or call.action.type not in BATCHABLE:
             break
     return batch or [ToolError("no tool call in the reply; call a tool")]
+
+
+def calls_after(content: list[dict[str, Any]], batch: list[ParsedCall | ToolError]) -> list[str]:
+    """Short descriptions of the tool calls in a reply that came after the batch ended, so the
+    model is told they were not run."""
+    uses = [b for b in content if b.get("type") == "tool_use"]
+    out = []
+    for block in uses[len(batch) :]:
+        args = {k: v for k, v in (block.get("input") or {}).items() if k != "rationale"}
+        shown = ", ".join(f"{k}={v!r}" for k, v in args.items())[:120]
+        out.append(f"{block.get('name', '?')}({shown})")
+    return out

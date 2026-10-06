@@ -9,6 +9,14 @@ import httpx
 
 Role = Literal["judge", "helper", "navigator"]
 
+# USD per million tokens (input, output), first-party API rates as of 2026-10. Cache reads cost
+# 0.1x input and 5-minute cache writes 1.25x. Used for budgets and reports, not billing.
+PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+}
+
 
 class LLMError(RuntimeError):
     """The gateway or the API failed after retries, or the model refused."""
@@ -20,18 +28,30 @@ class TokenUsage:
     tokens_out: int = 0
     llm_calls: int = 0
     cached_calls: int = 0
+    # Parts of tokens_in, for cost: prompt-cache reads and writes are priced differently.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
     def add(self, usage: dict[str, int], cached: bool) -> None:
         self.llm_calls += 1
         if cached:  # answered from the gateway's response cache: no tokens spent
             self.cached_calls += 1
             return
+        self.cache_read_tokens += usage.get("cache_read_input_tokens", 0)
+        self.cache_write_tokens += usage.get("cache_creation_input_tokens", 0)
         self.tokens_in += (
             usage.get("input_tokens", 0)
             + usage.get("cache_read_input_tokens", 0)
             + usage.get("cache_creation_input_tokens", 0)
         )
         self.tokens_out += usage.get("output_tokens", 0)
+
+    def cost_usd(self, model: str) -> float:
+        """Estimated spend if every call went to `model`."""
+        price_in, price_out = PRICES_PER_MTOK[model]
+        fresh = self.tokens_in - self.cache_read_tokens - self.cache_write_tokens
+        weighted_in = fresh + 0.1 * self.cache_read_tokens + 1.25 * self.cache_write_tokens
+        return (weighted_in * price_in + self.tokens_out * price_out) / 1_000_000
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -49,6 +69,7 @@ class LLMResponse:
     model: str
     cached: bool
     content: list[dict[str, Any]] = field(default_factory=list)
+    usage: dict[str, int] = field(default_factory=dict)  # this call's API usage
 
 
 class LLMClient:
@@ -62,9 +83,17 @@ class LLMClient:
         await self._http.aclose()
 
     async def call(
-        self, role: Role, site_id: str, purpose: str, request: dict[str, Any], usage: TokenUsage
+        self,
+        role: Role,
+        site_id: str,
+        purpose: str,
+        request: dict[str, Any],
+        usage: TokenUsage,
+        cache: bool = True,
     ) -> LLMResponse:
         body = {"role": role, "site_id": site_id, "purpose": purpose, "request": request}
+        if not cache:
+            body["cache"] = False
         last_error = "no attempt"
         for attempt in range(self._retries + 1):
             try:
@@ -81,7 +110,12 @@ class LLMClient:
                         b.get("text", "") for b in data["content"] if b.get("type") == "text"
                     )
                     return LLMResponse(
-                        text, data["stop_reason"], data["model"], data["cached"], data["content"]
+                        text,
+                        data["stop_reason"],
+                        data["model"],
+                        data["cached"],
+                        data["content"],
+                        data["usage"],
                     )
                 last_error, retryable = data.get("error", "unknown"), data.get("retryable")
             if not retryable:

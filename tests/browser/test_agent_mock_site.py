@@ -126,7 +126,8 @@ class Solver:
 
 
 def run(variant: str, script, tmp_path: Path, **kw) -> MockRun:
-    return asyncio.run(run_on_mock(variant, ScriptedDecider(script), tmp_path, limits(**kw), GOAL))
+    decider = ScriptedDecider(script)
+    return asyncio.run(run_on_mock(variant, lambda _: decider, tmp_path, limits(**kw), GOAL))
 
 
 @pytest.mark.parametrize(

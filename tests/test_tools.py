@@ -7,6 +7,7 @@ from scamhunter.agent.tools import (
     TOOLS,
     ParsedCall,
     ToolError,
+    calls_after,
     parse_tool_call,
     pick_tool_calls,
 )
@@ -150,3 +151,15 @@ def test_a_malformed_call_ends_the_batch() -> None:
     batch = pick_tool_calls(content)
     assert isinstance(batch[0], ParsedCall) and isinstance(batch[1], ToolError)
     assert len(batch) == 2
+
+
+def test_calls_after_the_batch_are_listed_as_not_run() -> None:
+    content = [
+        _use("a", "fill", element_id=1, value="{identity.email}"),
+        _use("b", "click", element_id=4),
+        _use("c", "click", element_id=5),
+        _use("d", "fill", element_id=6, value="x"),
+    ]
+    batch = pick_tool_calls(content)
+    assert calls_after(content, batch) == ["click(element_id=5)", "fill(element_id=6, value='x')"]
+    assert calls_after([{"type": "text", "text": "hi"}], pick_tool_calls([])) == []

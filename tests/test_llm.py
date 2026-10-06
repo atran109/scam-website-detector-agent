@@ -127,3 +127,31 @@ def test_cached_calls_cost_no_tokens() -> None:
         "llm_calls": 2,
         "cached_calls": 1,
     }
+
+
+def test_cost_prices_cache_reads_and_writes() -> None:
+    from scamhunter.llm.client import TokenUsage
+
+    usage = TokenUsage()
+    usage.add(
+        {
+            "input_tokens": 1_000_000,
+            "cache_read_input_tokens": 1_000_000,
+            "cache_creation_input_tokens": 1_000_000,
+            "output_tokens": 100_000,
+        },
+        cached=False,
+    )
+    # Sonnet 5.5: 2.00 fresh + 0.20 read + 2.50 write + 1.00 output
+    assert usage.cost_usd("claude-sonnet-5-5") == pytest.approx(5.70)
+
+
+def test_requests_may_opt_out_of_the_response_cache() -> None:
+    body = {
+        "role": "navigator",
+        "site_id": "s",
+        "purpose": "p",
+        "request": {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 10},
+    }
+    assert validate_request(body).cache is True
+    assert validate_request(body | {"cache": False}).cache is False

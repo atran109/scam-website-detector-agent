@@ -23,6 +23,8 @@ RUN pip install .
 COPY config ./config
 COPY data ./data
 COPY docker/selftest.py ./docker/selftest.py
+# The local mock exchange, for mock mode (`scamhunter agent-mock`); loopback only.
+COPY tests/fixtures/mock_exchange ./tests/fixtures/mock_exchange
 
 RUN useradd --create-home --uid 10001 crawler \
     && mkdir -p /app/runs /app/output \
