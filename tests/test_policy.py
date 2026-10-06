@@ -311,3 +311,48 @@ def test_same_url_and_action_three_times_in_a_row_is_no_progress() -> None:
     assert [loop.record("https://a/", same) for _ in range(3)] == [False, False, True]
     assert not loop.record("https://a/", act(ActionType.CLICK, element_id=5))  # different: resets
     assert not loop.record("https://b/", act(ActionType.CLICK, element_id=5))  # other URL
+
+
+# ---------- identity documents, uploads, links (DESIGN §5.5, 2026-10-06) ----------
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        el(1, "textbox", "Upload ID card", input_type="file"),
+        el(1, "textbox", "Passport photo", input_type="file"),
+        el(1, "textbox", "", input_type="file", hints="id_card_front"),
+    ],
+)
+def test_identity_document_upload_field_is_a_kyc_gate(field: Element) -> None:
+    for kind, kw in ((ActionType.CLICK, {}), (ActionType.FILL, {"value": "x"})):
+        d = decide(act(kind, element_id=1, **kw), [field])
+        assert not d.allowed and d.blocked_at == BlockedReason.KYC
+
+
+@pytest.mark.parametrize("name", ["Upload ID", "Upload your passport", "Take a selfie"])
+def test_identity_document_upload_buttons_are_a_kyc_gate(name: str) -> None:
+    d = click(name)
+    assert not d.allowed and d.blocked_at == BlockedReason.KYC
+
+
+def test_other_file_inputs_are_never_used() -> None:
+    d = decide(act(ActionType.CLICK, element_id=1), [el(1, "textbox", "Avatar", input_type="file")])
+    assert not d.allowed and d.blocked_at is None
+
+
+@pytest.mark.parametrize(
+    ("href", "allowed"),
+    [
+        (f"https://{SITE}/register", True),
+        (f"https://www.{SITE}/login", True),
+        ("javascript:void(0)", True),
+        ("#/deposit", True),
+        ("https://evil.test/claim-bonus", False),
+        ("https://t.me/support_bot", False),
+        (f"https://{SITE}.evil.test/", False),
+    ],
+)
+def test_links_stay_on_the_site(href: str, allowed: bool) -> None:
+    d = decide(act(ActionType.CLICK, element_id=1), [el(1, "link", "Claim bonus", href=href)])
+    assert d.allowed is allowed

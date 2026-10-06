@@ -122,6 +122,7 @@ class StopReason(StrEnum):
     GOAL_REACHED = "goal_reached"  # all deposit options tried
     BUDGET_STEPS = "budget_steps"
     BUDGET_TIME = "budget_time"
+    BUDGET_TOKENS = "budget_tokens"  # per-site LLM token cap hit
     BLOCKED = "blocked"  # gate we won't pass; see BlockedReason
     NO_PROGRESS = "no_progress"  # loop detected
     NOT_APPLICABLE = "not_applicable"  # site has no account/deposit concept

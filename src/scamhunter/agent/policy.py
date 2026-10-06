@@ -81,6 +81,13 @@ KYC_FIELD = re.compile(
     r"|身份证",
     re.I,
 )
+# A control that uploads an identity document: a KYC gate, never used.
+KYC_UPLOAD = re.compile(
+    r"upload.{0,25}(?:\bid\b|identity|passport|driver|licen[cs]e|selfie|document)"
+    r"|\bselfie\b|(?:front|back) (?:side )?of (?:your |the )?(?:id|card|passport)"
+    r"|上传身份证",
+    re.I,
+)
 AMOUNT_FIELD = re.compile(r"amount|quantity|金额|\bsum\b", re.I)
 
 
@@ -106,6 +113,14 @@ def _block(reason: str, blocked_at: BlockedReason | None = None) -> Decision:
     return Decision(False, reason, blocked_at)
 
 
+def _kyc_block() -> Decision:
+    return _block(
+        "this asks for identity documents, which are never provided; if the site requires "
+        "them to continue, call done with blocked_at kyc",
+        BlockedReason.KYC,
+    )
+
+
 def _label(element: Element) -> str:
     return f"{element.name} {element.hints}"
 
@@ -129,6 +144,8 @@ class Policy:
                 return _block(f"there is no element [{action.element_id}] on this page")
             if element.disabled:
                 return _block(f"element [{element.id}] is disabled")
+            if element.input_type == "file":
+                return self._file_input(element)
             if kind == ActionType.CLICK:
                 return self._click(element, facts)
             if kind == ActionType.FILL:
@@ -157,11 +174,20 @@ class Policy:
 
     # ---------- clicks ----------
 
+    def _file_input(self, element: Element) -> Decision:
+        if KYC_FIELD.search(_label(element)) or KYC_UPLOAD.search(_label(element)):
+            return _kyc_block()
+        return _block("file uploads are never used")
+
     def _click(self, element: Element, facts: PageFacts) -> Decision:
         label = _label(element)
         for pattern, why in ALWAYS_BLOCKED_CLICK:
             if pattern.search(label):
                 return _block(f'clicking "{element.name}" is not allowed: {why}')
+        if KYC_UPLOAD.search(label):
+            return _kyc_block()
+        if element.href and not self._href_on_site(element.href):
+            return _block(f"this link leaves {self.site_domain}; stay on the site")
         if WALLET_CONNECT.search(label):
             if self.mock_wallet_active:
                 return ALLOW
@@ -205,9 +231,7 @@ class Policy:
         if CARD_BANK_FIELD.search(label):
             return _block("never enter card or bank details")
         if KYC_FIELD.search(label):
-            return _block(
-                "this asks for identity documents, which are never entered", BlockedReason.KYC
-            )
+            return _kyc_block()
         if AMOUNT_FIELD.search(label):
             return self._amount(value, facts)
         return self._text(element, value)
@@ -258,6 +282,14 @@ class Policy:
         return ALLOW
 
     # ---------- navigation ----------
+
+    def _href_on_site(self, href: str) -> bool:
+        """True for links on this site and for non-web hrefs (javascript:, #, mailto: do not
+        load another site)."""
+        parts = urlparse(href)
+        if parts.scheme not in {"http", "https"}:
+            return True
+        return bool(parts.hostname) and registrable(parts.hostname) == self.site_domain
 
     def _goto(self, url: str) -> Decision:
         parts = urlparse(url)
