@@ -746,7 +746,7 @@ examples:                   # documentation/test addresses
 
 Extend this during the run: any address seen on many unrelated sites is probably a library constant, not a scammer wallet.
 
-**`config/brands.yaml`**: impersonation targets for typosquat scoring. Binance, Coinbase, Bitget, Bitmain, OKX, Bybit, Kraken, KuCoin, Upbit, Huobi/HTX, Gate, MEXC, Crypto.com, CoinMarketCap, CoinGecko, MetaMask, Trust Wallet, Trezor, Ledger, Tesla, TikTok, OpenAI, XTB, Mitrade, Coinhako. Seeded from names visible in the URL list.
+**`config/brands.yaml`**: impersonation targets for typosquat scoring. Binance, Coinbase, Bitget, Bitmain, OKX, Bybit, Kraken, KuCoin, Upbit, Huobi/HTX, Gate, MEXC, Crypto.com, CoinMarketCap, CoinGecko, MetaMask, Trust Wallet, Trezor, Ledger, Tesla, TikTok, OpenAI, XTB, Mitrade, Coinhako, BTCC, CoinEx, BigONE, Bitkan, Bitfinex/BFX, ZFX, Interactive Brokers, Tatung, POIZON (plus alias poizvip), BitMEX (lookalike "bitxex" only). Seeded from names visible in the URL list; part of the list was built while reviewing it, so the brand signal overstates how well it generalizes (LOG 2026-10-05).
 
 **`config/settings.yaml`**
 

@@ -29,7 +29,7 @@ from scamhunter.browser.capture import (
 )
 from scamhunter.browser.sandbox import launch_browser, new_context
 from scamhunter.browser.wayback import usable_captures
-from scamhunter.classify.domain import domain_signals, load_brands
+from scamhunter.classify.domain import BrandToken, domain_signals, load_brands
 from scamhunter.classify.llm_judge import judge
 from scamhunter.classify.scorer import score_content, score_without_content
 from scamhunter.classify.signals import address_signal, content_signals, triage_signals
@@ -141,7 +141,7 @@ class RunContext:
     run_dir: Path
     llm: LLMClient
     blocklist: frozenset[str] = field(default_factory=load_blocklist)
-    brands: list[str] = field(default_factory=load_brands)
+    brands: list[BrandToken] = field(default_factory=load_brands)
     proxy: str | None = None
     browser: Browser | None = None
 
@@ -470,7 +470,7 @@ def _error_result(
     error: str,
     started: datetime,
     settings: Settings,
-    brands: list[str],
+    brands: list[BrandToken],
 ) -> SiteResult:
     signals = domain_signals(site.host, site.registrable_domain, brands) + triage_signals(triage)
     classification = score_without_content(

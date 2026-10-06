@@ -1,6 +1,7 @@
 """Domain signals: TLD, free hosting, brand lookalikes, crypto/finance terms."""
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -60,12 +61,42 @@ FINANCE_TERMS = re.compile(
 MOBILE_PREFIXES = ("h5.", "m.", "wap.", "web3.")
 
 
-def load_brands(path: Path = REPO_ROOT / "config" / "brands.yaml") -> list[str]:
-    return yaml.safe_load(path.read_text())["brands"]
+@dataclass(frozen=True)
+class BrandToken:
+    """One spelling of a brand and how it may match a domain name."""
+
+    brand: str
+    token: str
+    mode: str  # "substring" | "anchored" | "exact", see _plain_match
+    fuzzy: bool
+    own_name: bool  # the brand's real name; an alias or known lookalike is never "the real site"
+
+
+MIN_SUBSTRING_LEN = 5  # shorter tokens ("okx", "gate") must sit at an edge of a name part
+MIN_FUZZY_LEN = 6
+# Words that sit one edit from a brand ("finance" ~ "binance"); never a typosquat window.
+BENIGN_WORDS = frozenset(
+    "finance financial bitcoin coin coins trade trading market markets global exchange capital"
+    " crypto wallet".split()
+)
 
 
 def _token(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def load_brands(path: Path = REPO_ROOT / "config" / "brands.yaml") -> list[BrandToken]:
+    """Entries are "Name/alias" strings or mappings {name, tokens, match, fuzzy}."""
+    out: list[BrandToken] = []
+    for entry in yaml.safe_load(path.read_text())["brands"]:
+        if isinstance(entry, str):
+            entry = {"name": entry, "tokens": [_token(p) for p in entry.split("/")]}
+        for token in entry["tokens"]:
+            mode = entry.get("match") or ("substring" if len(token) >= MIN_SUBSTRING_LEN else "anchored")
+            fuzzy = entry.get("fuzzy", True) and len(token) >= MIN_FUZZY_LEN
+            own = token in {_token(p) for p in entry["name"].split("/")}
+            out.append(BrandToken(entry["name"], token, mode, fuzzy, own))
+    return out
 
 
 def _edit_distance(a: str, b: str) -> int:
@@ -78,34 +109,69 @@ def _edit_distance(a: str, b: str) -> int:
     return prev[-1]
 
 
-def brand_signal(label: str, brands: list[str]) -> Signal | None:
-    """Brand name inside the domain label, or one edit away from it (typosquat)."""
-    for brand in brands:
-        for part in brand.split("/"):
-            token = _token(part)
-            if len(token) < 4 or label == token:  # exact label: possibly the real brand
+def _site_names(host: str, registrable_domain: str) -> list[tuple[str, bool]]:
+    """Labels that name the site, each flagged when it is the registrable label (the only place
+    a label equal to a brand may be the real brand). On free hosting the provider's own labels
+    are dropped: the subdomain is the site name."""
+    labels = host.lower().split(".")
+    for suffix in FREE_HOSTING:
+        if host == suffix or host.endswith("." + suffix):
+            return [(label, False) for label in labels[: -len(suffix.split("."))]]
+    registrable_label = registrable_domain.lower().split(".")[0]
+    return [(label, label == registrable_label) for label in labels[:-1] or labels]
+
+
+def _plain_match(token: BrandToken, joined: str, parts: list[str]) -> bool:
+    if token.mode == "substring":
+        return token.token in joined
+    if token.mode == "anchored":  # at the start or end of a hyphen-separated part
+        return any(p.startswith(token.token) or p.endswith(token.token) for p in parts)
+    return any(p.strip("0123456789") == token.token for p in parts)  # exact: the whole part
+
+
+def _fuzzy_match(token: BrandToken, joined: str, parts: list[str]) -> str | None:
+    """A whole name part, or its start or end, one or two typos from the brand. The first
+    letter must agree (typosquats keep it; "finance" vs "binance" does not)."""
+    max_edits = 2 if len(token.token) >= 10 else 1
+    for part in {joined, *parts}:
+        for size in range(len(token.token) - max_edits, len(token.token) + max_edits + 1):
+            if size > len(part):
                 continue
-            if token in label:
+            for window in {part[:size], part[-size:]}:
+                if window[0] != token.token[0] or window in BENIGN_WORDS:
+                    continue
+                if 0 < _edit_distance(window, token.token) <= max_edits:
+                    return window
+    return None
+
+
+def brand_signal(host: str, registrable_domain: str, brands: list[BrandToken]) -> Signal | None:
+    """A brand name inside any site-name label, or a whole-part typo of it."""
+    for label, is_registrable in _site_names(host, registrable_domain):
+        parts = [p for p in re.split(r"-+", label) if p]
+        joined = _token(label)
+        for brand in brands:
+            if is_registrable and brand.own_name and label == brand.token:  # maybe the real site
+                continue
+            if _plain_match(brand, joined, parts):
                 return Signal(
-                    name=f"brand_in_domain:{token}",
+                    name=f"brand_in_domain:{brand.token}",
                     tier=SignalTier.MODERATE,
                     weight=1.5,
-                    evidence=f'"{token}" inside domain label "{label}"',
+                    evidence=f'"{brand.token}" inside domain label "{label}"',
                     source="domain",
                 )
-            if len(token) >= 6:
-                max_edits = 2 if len(token) >= 10 else 1  # long names tolerate two typos
-                for size in range(len(token) - max_edits, len(token) + max_edits + 1):
-                    for i in range(0, max(len(label) - size, 0) + 1):
-                        window = label[i : i + size]
-                        if _edit_distance(window, token) <= max_edits:
-                            return Signal(
-                                name=f"brand_typosquat:{token}",
-                                tier=SignalTier.MODERATE,
-                                weight=1.5,
-                                evidence=f'"{window}" ≈ "{token}"',
-                                source="domain",
-                            )
+        for brand in brands:
+            if not brand.fuzzy or (is_registrable and brand.own_name and label == brand.token):
+                continue
+            if window := _fuzzy_match(brand, joined, parts):
+                return Signal(
+                    name=f"brand_typosquat:{brand.token}",
+                    tier=SignalTier.MODERATE,
+                    weight=1.5,
+                    evidence=f'"{window}" ≈ "{brand.token}" in "{label}"',
+                    source="domain",
+                )
     return None
 
 
@@ -151,9 +217,9 @@ def random_domain_reason(registrable_domain: str) -> str | None:
     return None
 
 
-def domain_signals(host: str, registrable_domain: str, brands: list[str]) -> list[Signal]:
+def domain_signals(host: str, registrable_domain: str, brands: list[BrandToken]) -> list[Signal]:
     signals: list[Signal] = []
-    label, _, tld = registrable_domain.partition(".")
+    _, _, tld = registrable_domain.partition(".")
     free_hosting = any(host == h or host.endswith("." + h) for h in FREE_HOSTING)
     if free_hosting:
         signals.append(
@@ -175,7 +241,7 @@ def domain_signals(host: str, registrable_domain: str, brands: list[str]) -> lis
                 source="domain",
             )
         )
-    if brand := brand_signal(_token(label) if "." in registrable_domain else _token(host), brands):
+    if brand := brand_signal(host, registrable_domain, brands):
         signals.append(brand)
     if m := FINANCE_TERMS.search(host.lower()):
         signals.append(

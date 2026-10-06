@@ -10,7 +10,9 @@ brands:
   - "KuCoin"
   - "Upbit"
   - "Huobi/HTX"
-  - "Gate"
+  - name: "Gate"
+    tokens: [gate]
+    match: exact  # "gateway", "navigate": only the whole word counts
   - "MEXC"
   - "Crypto.com"
   - "CoinMarketCap"
@@ -25,3 +27,19 @@ brands:
   - "XTB"
   - "Mitrade"
   - "Coinhako"
+  # Added 2026-10-05 from a review of the URL list (see LOG): provenance caveat applies.
+  - "BTCC"
+  - name: "CoinEx"
+    tokens: [coinex]
+    match: anchored  # "bitcoinexchange" must not match
+  - "BigONE"
+  - "Bitkan"
+  - "Bitfinex/BFX"
+  - "ZFX"
+  - "Interactive Brokers"
+  - "Tatung"
+  - name: "POIZON"
+    tokens: [poizon, poizvip]  # poizvip is a manual alias: the site says POIZON, the domain does not
+  - name: "BitMEX"
+    tokens: [bitxex]  # the one lookalike seen in the list; exact only, "bitmex" is not listed
+    fuzzy: false
