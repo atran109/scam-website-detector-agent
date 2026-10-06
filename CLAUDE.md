@@ -17,12 +17,13 @@ Crypto scam detection agent for the TRM Labs take-home. For each URL in `data/ur
 
 ## How to work
 - Python 3.12, asyncio, Pydantic v2, Playwright. Type hints everywhere.
-- Small commits with clear messages. Run `make test` before committing.
+- Small commits with clear messages. Run `make check` (lint + format check + unit tests) before every commit.
 - Prefer plain, readable code over clever abstractions; this will be read by reviewers.
 - When unsure about a design choice, ask rather than guess.
 
 ## Commands
 - `make selftest` — egress/isolation checks (must pass before real visits)
 - `make test` — unit tests
+- `make check` — lint, format check and unit tests; run before every commit
 - `make run` / `make rescore` — see DESIGN §2.4
 - `make review RUN=<id>` — read-only HTML review page + labels template from saved evidence (no containers); open `runs/<id>/review/index.html` only from that folder
