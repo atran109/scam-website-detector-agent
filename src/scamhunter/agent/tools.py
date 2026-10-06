@@ -181,13 +181,21 @@ def parse_tool_call(name: str, args: Any, tool_use_id: str | None = None) -> Par
     return ParsedCall(built, blocked_at, tool_use_id)
 
 
-def pick_tool_call(content: list[dict[str, Any]]) -> ParsedCall | ToolError:
-    """The call to run from a model reply (the content blocks of an LLMResponse).
+BATCHABLE = {ActionType.FILL, ActionType.SELECT}
 
-    A reply with text and no tool call is a failed step (DESIGN §5.5, decided 2026-10-05): the
-    loop counts it toward `max_consecutive_failures`. If the model sent several calls, only the
-    first runs; the page changes after each action, so later calls would act on a stale view."""
+
+def pick_tool_calls(content: list[dict[str, Any]]) -> list[ParsedCall | ToolError]:
+    """The calls to run from one reply, in order (DESIGN §5.5, decided 2026-10-06): any number
+    of leading `fill`/`select` calls, then at most one other action, which ends the batch
+    (the page changes after a click, so later calls would act on a stale view). A malformed
+    call ends the batch at that point. Never empty: a reply with no tool call is one ToolError,
+    which the loop counts as a failed step (DESIGN §5.5, decided 2026-10-05)."""
+    batch: list[ParsedCall | ToolError] = []
     for block in content:
-        if block.get("type") == "tool_use":
-            return parse_tool_call(block.get("name", ""), block.get("input"), block.get("id"))
-    return ToolError("no tool call in the reply; call exactly one tool")
+        if block.get("type") != "tool_use":
+            continue
+        call = parse_tool_call(block.get("name", ""), block.get("input"), block.get("id"))
+        batch.append(call)
+        if isinstance(call, ToolError) or call.action.type not in BATCHABLE:
+            break
+    return batch or [ToolError("no tool call in the reply; call a tool")]

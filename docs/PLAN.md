@@ -102,10 +102,10 @@ Adjust the hours to the real schedule.
 - [x] Local mock exchange fixture (register → login → deposit → coin/network selector) with failure variants and traps (step A done 2026-10-05). **Mock mode (decided 2026-10-05):** runs inside the crawler container (no route out); the browser runs without the proxy only under an explicit `--mock` flag that refuses every non-loopback URL; `make selftest` checks that refusal
 - [x] `elements.py`: accessibility roles **plus** non-semantic clickables (`cursor: pointer`, click handlers) (step B, 2026-10-05)
 - [x] Tool whitelist incl. `click_at` fallback; policy checks (same-domain, placeholders only, no payments/signing) (step C, 2026-10-05)
-- [~] Synthetic identity + disposable mailbox (`check_email`): identity and mail.tm client built (step C); mail.tm not yet exercised against the live API, `check_email` wiring is in the loop (step D)
-- [ ] Iterate every coin and network on the deposit page; extract after every step
-- [ ] Stop conditions and `blocked_at` (invite code, SMS, CAPTCHA, KYC, geo-block, `email_verification`)
-- [ ] Give-up rule: stop a site after 4 consecutive failed steps (`max_consecutive_failures`)
+- [~] Synthetic identity + disposable mailbox (`check_email`): identity and mail.tm client built (step C); `check_email` wired into the loop and exercised against the mock inbox (step D, 2026-10-06); mail.tm not yet exercised against the live API
+- [x] Iterate every coin and network on the deposit page; extract after every step (loop.py, step D 2026-10-06; proven on the mock by a scripted decider)
+- [x] Stop conditions and `blocked_at` (invite code, SMS, CAPTCHA, KYC, geo-block, `email_verification`) (step D)
+- [x] Give-up rule: stop a site after 4 consecutive failed steps (`max_consecutive_failures`) (step D)
 - [ ] Disposable email: **mail.tm** (decided 2026-10-05); API token held in memory only, never logged or written to disk; mail traffic goes through the egress proxy; if the verification email never arrives, record `blocked_at: email_verification` and move on
 - [x] Policy rules from the 2026-10-05 decisions (deposit amounts, deposit-page clicks, "I have paid"/receipt blocked, wallet clicks, text reply = failed step): DESIGN §5.5
 - [ ] Mock wallet (`window.ethereum`) via init script, logging requested recipients: **deferred until after the pilot, not cut.** Tally wallet-gated sites (`blocked_at: wallet_required`) in the pilot; build it if there are several. Connect-wallet clicks become allowed once it exists (sign/approve stay blocked)

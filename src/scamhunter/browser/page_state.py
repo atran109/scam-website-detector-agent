@@ -154,6 +154,18 @@ async def _text_and_headings(page: Page) -> tuple[str, list[str]]:
     return strip_control(text), [strip_control(h)[:100] for h in headings]
 
 
+async def labelled_deposit_page(page: Page) -> bool:
+    """Whether the current page is labelled as a deposit page (URL path, title or headings),
+    without building a full observation."""
+    _, headings = await _text_and_headings(page)
+    try:
+        title = await page.title()
+    except PlaywrightError:
+        title = ""
+    facts = compute_facts(page.url, title, headings, "", [], DiscoveryStage.NAVIGATION)
+    return facts.is_deposit_page
+
+
 async def observe(page: Page, stage: DiscoveryStage, coverage: Coverage) -> PageState:
     """Build the observation for one step. Never raises on page trouble."""
     elements = await list_elements(page)

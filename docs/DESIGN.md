@@ -167,7 +167,7 @@ scam-website-detector-agent/
 │   ├── test_validators.py
 │   ├── test_extractor.py
 │   ├── test_scorer.py
-│   └── test_agent_mock_site.py  # end-to-end against the local mock exchange
+│   └── browser/test_agent_mock_site.py  # end-to-end agent loop against the local mock exchange
 │
 ├── output/                      # deliverables (committed at the end)
 │   ├── results.json

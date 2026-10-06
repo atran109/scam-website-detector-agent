@@ -8,7 +8,7 @@ from scamhunter.agent.tools import (
     ParsedCall,
     ToolError,
     parse_tool_call,
-    pick_tool_call,
+    pick_tool_calls,
 )
 from scamhunter.models import ActionType, BlockedReason
 
@@ -110,16 +110,43 @@ def test_malformed_calls_are_tool_errors(name: str, args) -> None:
 
 
 def test_text_only_reply_is_a_failed_step() -> None:
-    result = pick_tool_call([{"type": "text", "text": "I will now click Register."}])
+    [result] = pick_tool_calls([{"type": "text", "text": "I will now click Register."}])
     assert isinstance(result, ToolError) and "no tool call" in result.message
-    assert isinstance(pick_tool_call([]), ToolError)
+    assert isinstance(pick_tool_calls([])[0], ToolError)
 
 
-def test_first_tool_call_wins_and_text_is_ignored() -> None:
+def _use(id: str, name: str, **args) -> dict:
+    return {"type": "tool_use", "id": id, "name": name, "input": {"rationale": "r", **args}}
+
+
+def test_a_non_fill_action_ends_the_batch_and_text_is_ignored() -> None:
     content = [
         {"type": "text", "text": "thinking"},
-        {"type": "tool_use", "id": "a", "name": "back", "input": {"rationale": "r"}},
-        {"type": "tool_use", "id": "b", "name": "click", "input": {"element_id": 1}},
+        _use("a", "back"),
+        _use("b", "click", element_id=1),
     ]
-    result = pick_tool_call(content)
-    assert isinstance(result, ParsedCall) and result.tool_use_id == "a"
+    assert [c.tool_use_id for c in pick_tool_calls(content)] == ["a"]
+
+
+def test_fills_and_selects_batch_up_to_one_click() -> None:
+    content = [
+        _use("a", "fill", element_id=1, value="{identity.email}"),
+        _use("b", "select", element_id=2, option="USDT"),
+        _use("c", "fill", element_id=3, value="{identity.password}"),
+        _use("d", "click", element_id=4),
+        _use("e", "click", element_id=5),
+    ]
+    batch = pick_tool_calls(content)
+    assert [c.tool_use_id for c in batch] == ["a", "b", "c", "d"]
+    assert all(isinstance(c, ParsedCall) for c in batch)
+
+
+def test_a_malformed_call_ends_the_batch() -> None:
+    content = [
+        _use("a", "fill", element_id=1, value="x"),
+        _use("b", "fill", element_id="one", value="y"),
+        _use("c", "click", element_id=4),
+    ]
+    batch = pick_tool_calls(content)
+    assert isinstance(batch[0], ParsedCall) and isinstance(batch[1], ToolError)
+    assert len(batch) == 2
