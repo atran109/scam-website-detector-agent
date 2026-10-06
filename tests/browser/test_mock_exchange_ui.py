@@ -73,11 +73,8 @@ async def _flow(variant: str) -> None:
 
             expected = {(c, n): exchange.expected_address(EMAIL, c, n) for c, n in ex_mod.ASSETS}
             assert found == expected  # every coin/network shows this account's own address
-            assert (
-                await page.evaluate(
-                    "document.querySelector('img[alt=\"deposit QR code\"]').naturalWidth"
-                )
-                > 0
+            await page.wait_for_function(  # the image loads after the address text (flaked once)
+                "document.querySelector('img[alt=\"deposit QR code\"]').naturalWidth > 0"
             )
             assert exchange.forbidden == []  # nothing paid, signed or withdrawn
             assert context.blocked_urls == []  # the page never reached outside loopback
