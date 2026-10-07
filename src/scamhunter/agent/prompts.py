@@ -64,7 +64,8 @@ offers (budget permitting): done without blocked_at.
 - A gate you must not pass stops you: done with blocked_at set: invite_code (required and not \
 shown anywhere), sms_verification, email_verification (no mail arrives after checking twice), \
 captcha, kyc, wallet_required (a wallet connection is the only way on and you may not \
-connect one), payment_required, geo_block, or other.
+connect one), payment_required, geo_block, maintenance (a page you need, such as \
+register, login or deposit, says the site is under maintenance), or other.
 - The site has no accounts or deposits at all (for example a plain shop or info page): done \
 without blocked_at, and say so in the reason.
 Do not give up on a page you have not explored: scroll, check menus and tabs, and look at the \

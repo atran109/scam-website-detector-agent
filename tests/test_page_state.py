@@ -163,3 +163,14 @@ def test_printed_invitation_codes() -> None:
     assert printed_invite_codes("Referral code is XKCD") == ("XKCD",)
     assert printed_invite_codes("Invitation code\nRegister") == ()  # a label, then a word
     assert printed_invite_codes("Invitation code (optional)") == ()
+
+
+def test_a_maintenance_page_the_agent_reaches_is_a_named_gate() -> None:
+    """Pilot site 021's /register (the rest of the site was up)."""
+    from scamhunter.browser.page_state import gate_hints
+    from scamhunter.models import BlockedReason
+
+    text = "We'll Be Back Soon!\\n\\nOur website is currently undergoing scheduled maintenance"
+    assert BlockedReason.MAINTENANCE in gate_hints(text)
+    assert BlockedReason.MAINTENANCE in gate_hints("網站維護中")
+    assert gate_hints("Scheduled maintenance of our servers happened in 2023.") == []

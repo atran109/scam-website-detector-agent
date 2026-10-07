@@ -12,6 +12,7 @@ from scamhunter.llm.sanitize import untrusted
 from scamhunter.models import CryptoAddress, LLMJudgment, ScamType, Signal, Verdict
 
 PAGE_TEXT_CHARS = 8000
+NAV_TEXT_CHARS = 4000  # the page the navigation agent reached, shown after the landing page
 MAX_SCREENSHOT_HEIGHT = 3000  # px of the full-page screenshot kept (top of page)
 MAX_IMAGE_EDGE = 1568  # longest edge sent to the model
 
@@ -118,7 +119,10 @@ def build_request(
     addresses: list[CryptoAddress],
     effort: str,
     archived_note: str = "",
+    navigation: dict | None = None,
 ) -> dict:
+    """`navigation` (2026-10-07): the navigation agent's best page, as {url, title, text,
+    screenshot_png, note}; it is shown after the landing page, as a second image and text."""
     signal_lines = "\n".join(f"- {s.name} [{s.tier.value}]: {s.evidence}" for s in signals)
     analyst_note = f"""\
 Classify this website.
@@ -136,12 +140,25 @@ Crypto addresses our extractor validated on the page:
 Page title and visible text (untrusted):
 {untrusted("page_title", title, 300)}
 {untrusted("page_text", page_text, PAGE_TEXT_CHARS)}"""
+    images = _image_block(screenshot_png)
+    if navigation:
+        nav_images = _image_block(navigation.get("screenshot_png"))
+        images += nav_images
+        analyst_note += f"""
+
+Our navigation agent then used the site as a new visitor (a synthetic identity: it registered \
+and logged in where it could) and reached this page ({navigation["note"]}). \
+{"The second image is that page; the first is the landing page." if nav_images else ""}
+Page reached: {navigation["url"]}
+{untrusted("page_title_after_navigation", navigation.get("title") or "", 300)}
+{untrusted("page_text_after_navigation", navigation.get("text") or "", NAV_TEXT_CHARS)}
+Judge the site from both pages together."""
     return {
         "system": [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
         "messages": [
             {
                 "role": "user",
-                "content": _image_block(screenshot_png) + [{"type": "text", "text": analyst_note}],
+                "content": images + [{"type": "text", "text": analyst_note}],
             }
         ],
         "max_tokens": 16000,

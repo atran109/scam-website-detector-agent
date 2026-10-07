@@ -123,6 +123,8 @@ AD_FEED_ERROR_STUBS = ("page cannot be displayed. please contact your service pr
 # A placeholder, not the site: nothing to judge, so it takes the dead-site route (status EMPTY).
 MAINTENANCE_PHRASES = (
     "under maintenance",
+    "undergoing maintenance",
+    "undergoing scheduled maintenance",
     "down for maintenance",
     "maintenance mode",
     "網站維護中",

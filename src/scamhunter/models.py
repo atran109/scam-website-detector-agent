@@ -139,6 +139,7 @@ class BlockedReason(StrEnum):  # NavigationTrace.blocked_at
     GEO_BLOCK = "geo_block"
     PAYMENT_REQUIRED = "payment_required"  # e.g. "deposit to activate account"
     WALLET_REQUIRED = "wallet_required"  # needs a connected wallet; mock wallet not built yet
+    MAINTENANCE = "maintenance"  # a page the flow needs (register, login, deposit) is "under maintenance"
     OTHER = "other"
 
 

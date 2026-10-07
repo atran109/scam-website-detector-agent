@@ -394,6 +394,71 @@ def _has_content(ctx: RunContext, snapshots: list[PageSnapshot]) -> bool:
     return False
 
 
+def _is_agent_snapshot(snap: PageSnapshot) -> bool:
+    """Snapshots the navigation agent took (`a001`…); capture is `s01`…, Wayback `w01`."""
+    return snap.snapshot_id.startswith("a")
+
+
+def _best_navigation_page(snapshots: list[PageSnapshot], addresses: list[CryptoAddress]):
+    """The agent's most telling page for the judge: the last deposit page that shows a primary
+    address, else the last deposit page, else the last logged-in page, else the last page the
+    agent saw if it is not the landing page. None if the agent took no snapshot."""
+    agent = [s for s in snapshots if _is_agent_snapshot(s)]
+    if not agent:
+        return None
+    on_deposit = {
+        sg.page_url
+        for a in addresses
+        if a.tier == AddressTier.PRIMARY
+        for sg in a.sightings
+        if sg.stage == DiscoveryStage.DEPOSIT_PAGE
+    }
+    for wanted in (
+        lambda s: s.stage == DiscoveryStage.DEPOSIT_PAGE and s.url in on_deposit,
+        lambda s: s.stage == DiscoveryStage.DEPOSIT_PAGE,
+        lambda s: s.stage == DiscoveryStage.AUTHENTICATED,
+        lambda s: s.stage != DiscoveryStage.LANDING,
+    ):
+        found = [s for s in agent if wanted(s)]
+        if found:
+            return found[-1]
+    return None
+
+
+def merge_signals(groups: list[list[Signal]]) -> list[Signal]:
+    """One signal per name across several pages, keeping the heaviest (first on a tie)."""
+    best: dict[str, Signal] = {}
+    for group in groups:
+        for sig in group:
+            if sig.name not in best or sig.weight > best[sig.name].weight:
+                best[sig.name] = sig
+    return list(best.values())
+
+
+def deposit_flow_signal(addresses: list[CryptoAddress]) -> Signal | None:
+    """A primary address the site showed a registered user on its deposit or account pages (the
+    navigation agent's evidence, 2026-10-07). Raises the probability: a site that hands a new
+    synthetic account a deposit address is collecting deposits."""
+    shown = [
+        a
+        for a in addresses
+        if a.tier == AddressTier.PRIMARY
+        and any(
+            sg.stage in (DiscoveryStage.DEPOSIT_PAGE, DiscoveryStage.AUTHENTICATED)
+            for sg in a.sightings
+        )
+    ]
+    if not shown:
+        return None
+    return Signal(
+        name="deposit_address_after_registration",
+        tier=SignalTier.MODERATE,
+        weight=1.5,
+        evidence=f"{len(shown)} address(es) shown to a registered account on its deposit pages",
+        source="navigation",
+    )
+
+
 async def analyze(
     ctx: RunContext,
     site: Site,
@@ -402,21 +467,27 @@ async def analyze(
     *,
     partial: bool = False,
 ) -> Analysis:
-    """Extraction + classification from saved snapshots (or the dead-site policy if none)."""
+    """Extraction + classification from saved snapshots (or the dead-site policy if none).
+
+    After navigation (2026-10-07, pilot sites 012 and 021): the non-content check runs on the
+    capture snapshots only (a maintenance page the agent reached is a gate, not the site's
+    status); signals come from every snapshot; the judge sees the landing page *and* the agent's
+    best page; addresses shown to a registered account add a signal."""
     settings = ctx.settings
     threshold = settings.classify.scam_threshold
     usage = TokenUsage()
     notes: list[str] = []
     revised: TriageResult | None = None
-    if found := rendered_non_content(ctx.run_dir, snapshots):
+    capture = [s for s in snapshots if not _is_agent_snapshot(s)]
+    if found := rendered_non_content(ctx.run_dir, capture):
         revised = triage = mark_non_content(triage, *found)
         notes.append(f"{non_content_note(*found)}: dead-site rule applies")
-        snapshots = []
+        snapshots = capture = []
     base_signals = domain_signals(site.host, site.registrable_domain, ctx.brands) + triage_signals(
         triage
     )
 
-    if not snapshots or not _has_content(ctx, snapshots):
+    if not snapshots or not _has_content(ctx, capture or snapshots):
         return Analysis(
             score_without_content(base_signals, threshold, _status_note(triage)),
             [],
@@ -427,9 +498,11 @@ async def analyze(
 
     addresses: list[CryptoAddress] = []
     ignored: list[str] = []
+    contents = {}
     for snap in snapshots:
+        contents[snap.snapshot_id] = load_snapshot_content(snap, ctx.run_dir)
         addresses = merge_all(
-            addresses, extract(load_snapshot_content(snap, ctx.run_dir), ctx.blocklist, ignored)
+            addresses, extract(contents[snap.snapshot_id], ctx.blocklist, ignored)
         )
     addresses = _apply_highlights(addresses, ctx.site_dir(site), snapshots)
     if ignored:
@@ -438,12 +511,38 @@ async def analyze(
             f"(labelled contract on the page or under contract keys in API/script data)"
         )
 
-    # Judge the last snapshot: after a mobile retry or warning click-through, it's the real page.
-    last = snapshots[-1]
-    content = load_snapshot_content(last, ctx.run_dir)
-    signals = base_signals + content_signals(content.visible_text, content.html, site.host)
+    # The landing page: the last capture snapshot (after a mobile retry or a warning
+    # click-through it is the real page); the agent's best page goes alongside it.
+    landing = (capture or snapshots)[-1]
+    content = contents[landing.snapshot_id]
+    nav_page = _best_navigation_page(snapshots, addresses)
+    signals = base_signals + merge_signals(
+        [
+            content_signals(c.visible_text, c.html, site.host)
+            for c in (contents[s.snapshot_id] for s in snapshots)
+        ]
+    )
     if sig := address_signal(len(addresses)):
         signals.append(sig)
+    if sig := deposit_flow_signal(addresses):
+        signals.append(sig)
+    navigation = None
+    if nav_page is not None:
+        on_page = [
+            a
+            for a in addresses
+            if a.tier == AddressTier.PRIMARY
+            and any(sg.page_url == nav_page.url for sg in a.sightings)
+        ]
+        navigation = {
+            "url": nav_page.url,
+            "title": nav_page.title,
+            "text": contents[nav_page.snapshot_id].visible_text,
+            "screenshot_png": (ctx.run_dir / nav_page.screenshot_path).read_bytes()
+            if nav_page.screenshot_path
+            else None,
+            "note": f"stage {nav_page.stage.value}; {len(on_page)} primary address(es) on it",
+        }
     judgment = None
     try:
         judgment = await judge(
@@ -451,24 +550,25 @@ async def analyze(
             site.site_id,
             usage,
             url=site.url,
-            final_url=last.url,
-            title=last.title,
+            final_url=landing.url,
+            title=landing.title,
             status_note=_status_note(triage),
             page_text=content.visible_text,
-            screenshot_png=(ctx.run_dir / last.screenshot_path).read_bytes()
-            if last.screenshot_path
+            screenshot_png=(ctx.run_dir / landing.screenshot_path).read_bytes()
+            if landing.screenshot_path
             else None,
             signals=signals,
             addresses=addresses,
             effort=settings.llm.judge_effort,
-            archived_note=_archived_note(last, triage) if content.archived else "",
+            archived_note=_archived_note(landing, triage) if content.archived else "",
+            navigation=navigation,
         )
     except LLMError as exc:
         notes.append(f"LLM judgment unavailable, heuristics only: {exc}")
     classification, score_notes = score_content(
         signals, judgment, threshold, partial=partial, archived=content.archived
     )
-    return Analysis(classification, addresses, notes + score_notes, usage, last.url, revised)
+    return Analysis(classification, addresses, notes + score_notes, usage, landing.url, revised)
 
 
 # ============================================================
@@ -488,7 +588,8 @@ def build_result(
     navigation: NavigationTrace | None = None,
     identity_id: str | None = None,
 ) -> SiteResult:
-    scam = analysis.classification.verdict == Verdict.SCAM
+    # Every record lists its addresses whatever the verdict (output contract, 2026-10-07: pilot
+    # site 012's deposit addresses vanished when the verdict fell to not_scam at p=0.44).
     primary = [a for a in analysis.addresses if a.tier == AddressTier.PRIMARY]
     low = [a for a in analysis.addresses if a.tier == AddressTier.LOW_CONFIDENCE]
     return SiteResult(
@@ -496,9 +597,9 @@ def build_result(
         triage=analysis.triage or triage,  # analysis may have revised the status (parked)
         processing_status=processing,
         classification=analysis.classification,
-        addresses=primary if scam else [],
-        low_confidence_addresses=low if scam else [],
-        other_addresses=[] if scam else analysis.addresses,
+        addresses=primary,
+        low_confidence_addresses=low,
+        other_addresses=[],
         navigation=navigation,
         identity_used=identity_id,
         notes=notes + analysis.notes,

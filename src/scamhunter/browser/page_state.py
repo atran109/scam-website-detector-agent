@@ -167,6 +167,16 @@ GATE_TEXT: list[tuple[BlockedReason, re.Pattern[str]]] = [
         ),
     ),
     (
+        # A maintenance page the agent reached while the rest of the site is up (pilot site 021:
+        # /register said "We'll Be Back Soon!"). A gate, not a non-content site (2026-10-07).
+        BlockedReason.MAINTENANCE,
+        re.compile(
+            r"under(?:going)?\s+(?:scheduled\s+)?maintenance|down for maintenance|maintenance mode"
+            r"|we'?ll be back soon|網站維護中|网站维护中|系統維護中|系统维护中|维护中，|維護中，",
+            re.I,
+        ),
+    ),
+    (
         BlockedReason.GEO_BLOCK,
         re.compile(
             r"not available in your (?:country|region|location)"

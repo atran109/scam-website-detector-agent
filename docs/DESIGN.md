@@ -366,6 +366,7 @@ class BlockedReason(StrEnum):            # NavigationTrace.blocked_at
     GEO_BLOCK = "geo_block"
     PAYMENT_REQUIRED = "payment_required" # e.g. "deposit to activate account"
     WALLET_REQUIRED = "wallet_required"   # needs a connected wallet; counted in the pilot to decide the mock wallet
+    MAINTENANCE = "maintenance"           # a page the flow needs says "under maintenance" while the site is up (2026-10-07)
     OTHER = "other"
 
 class EvidenceSource(StrEnum):           # what the verdict was based on (dead-site policy, §5.2a)
@@ -557,9 +558,9 @@ class SiteResult(BaseModel):
     triage: TriageResult
     processing_status: ProcessingStatus
     classification: Classification
-    addresses: list[CryptoAddress]          # tier PRIMARY, reported for scam sites
-    low_confidence_addresses: list[CryptoAddress] = []  # tier LOW_CONFIDENCE, scam sites
-    other_addresses: list[CryptoAddress] = []  # seen on not_scam sites; kept for transparency, not in the main output lists
+    addresses: list[CryptoAddress]          # tier PRIMARY, on every record whatever the verdict (2026-10-07)
+    low_confidence_addresses: list[CryptoAddress] = []  # tier LOW_CONFIDENCE, every record
+    other_addresses: list[CryptoAddress] = []  # unused since 2026-10-07 (kept empty so old checkpoints still load)
     navigation: NavigationTrace | None
     identity_used: str | None = None        # identity id, not the secrets
     notes: list[str] = []                   # oddities worth a human look
@@ -616,7 +617,7 @@ class OutputRecord(BaseModel):
     evidence_source: EvidenceSource
     reasoning: str
     signals: list[str]             # Signal.name values
-    crypto_addresses: list[str]    # tier primary, strings as shown
+    crypto_addresses: list[str]    # tier primary, strings as shown, on every record whatever the verdict (2026-10-07)
     low_confidence_addresses: list[str]
     address_details: list[AddressDetail]
     navigation: NavigationSummary | None
@@ -723,7 +724,7 @@ The example below is illustrative, not a real finding (`TXyz…` is a placeholde
 | `scam_probability` | 0–1 fused score; verdict is `scam` iff `scam_probability >= scam_threshold` (0.45) | One number a grader can re-threshold |
 | `confidence` | Probability that the stated `classification` is correct: `scam_probability` for scam, `1 - scam_probability` for not_scam | Reads naturally per record; see note below |
 | `evidence_source` | `live`, `wayback`, `signals_only` or `none` (§5.2a) | Shows how much each verdict rests on; dead sites stay visible via `status` |
-| `crypto_addresses` | Flat list of strings: tier **primary** addresses, exactly as shown on the site | Easiest thing to compare against a ground-truth list |
+| `crypto_addresses` | Flat list of strings: tier **primary** addresses, exactly as shown on the site, **on every record whatever the verdict** (changed 2026-10-07: pilot site 012's three deposit addresses were dropped when its verdict fell to not_scam at p=0.44; an address is a fact about the page, the verdict is a judgment, and a reader can filter by `is_scam`) | Easiest thing to compare against a ground-truth list |
 | `low_confidence_addresses` | Flat list of strings: valid addresses without deposit/payment context | Keeps completeness without polluting the main list |
 | `address_details` | Objects with `address`, `normalized`, `tier`, `format`, `labels`, source, stage, screenshot, `sighting_count` | Evidence for reviewers |
 
@@ -731,7 +732,7 @@ The example below is illustrative, not a real finding (`TXyz…` is a placeholde
 
 **Flattening sightings.** `address_details[].source`, `stage` and `screenshot` come from one primary sighting: the earliest `deposit_page` sighting if there is one, otherwise the earliest sighting overall. `sighting_count` gives the total.
 
-**Address tiers.** A checksum-valid address is **primary** if it appears in a deposit or payment context: on a deposit page or after login, in a network response whose JSON key (or enclosing object's key) is a payment/spender key (`deposit…`, `recharge…`, `approve…`, `spender`, `receive…`, `wallet…`, `address`) or that names coin + network, in a QR code, in a wallet-mock transaction request, or beside a deposit/pay/send label on its own line or the lines just above it in the page text. Values under contract/token keys (`contract_address`, `token_address`, `mint`) in API or script data, and addresses the visible text labels as a contract ("Contract Address: 0x…", "Token address:", "Smart contract (BEP-20):", "合约地址"), are token contracts and are dropped (counted in a note); this was the pilot's main false-positive source. The decision is made once per address, so the same address in a "Copy" button attribute or script is dropped too. A label that tells visitors to send funds there ("Send ETH to the presale contract: 0x…") is not treated as a token contract, since a presale or payment contract can be the scammer's collection address. Otherwise it is **low confidence** (for example, found only in a script bundle, or lowercase EVM with no context). Blocklisted addresses (token contracts, zero/burn, examples) are never reported. Addresses found on `not_scam` sites go in `other_addresses`, outside the output lists.
+**Address tiers.** A checksum-valid address is **primary** if it appears in a deposit or payment context: on a deposit page or after login, in a network response whose JSON key (or enclosing object's key) is a payment/spender key (`deposit…`, `recharge…`, `approve…`, `spender`, `receive…`, `wallet…`, `address`) or that names coin + network, in a QR code, in a wallet-mock transaction request, or beside a deposit/pay/send label on its own line or the lines just above it in the page text. Values under contract/token keys (`contract_address`, `token_address`, `mint`) in API or script data, and addresses the visible text labels as a contract ("Contract Address: 0x…", "Token address:", "Smart contract (BEP-20):", "合约地址"), are token contracts and are dropped (counted in a note); this was the pilot's main false-positive source. The decision is made once per address, so the same address in a "Copy" button attribute or script is dropped too. A label that tells visitors to send funds there ("Send ETH to the presale contract: 0x…") is not treated as a token contract, since a presale or payment contract can be the scammer's collection address. Otherwise it is **low confidence** (for example, found only in a script bundle, or lowercase EVM with no context). Blocklisted addresses (token contracts, zero/burn, examples) are never reported. Addresses are listed on every record, whatever the verdict (2026-10-07; before that, addresses on `not_scam` sites went to `other_addresses`, outside the output lists).
 
 **Strings are reported as seen.** If a site shows an EVM address in lowercase, `address` is that lowercase string; `normalized` carries the checksummed form. Exact-string comparison then works, and case-insensitive comparison does too.
 
@@ -988,6 +989,8 @@ snapshot ─► patterns.py   finds candidates in: visible text, attributes, scr
    - **Otherwise:** `scam_probability = f(llm_probability, heuristic_score, evidence_completeness)`. Agreement between the LLM and heuristics pushes it away from 0.5. Disagreement pulls it toward 0.5 and adds a note. Partial visits (blocked, timeout) keep it away from the extremes. `confidence` is derived from it (§3.4).
    - Calibrate the thresholds against `eval/labels.csv`, and document the final formula in the README.
    - **Verdict bias:** the fused score maps to `scam` at `scam_threshold` = 0.45, slightly below an even split. Uncertain cases lean scam, with confidence kept low so reviewers can see which verdicts are shaky. Tune the threshold on the hand labels and report the resulting precision and recall.
+
+**After navigation (2026-10-07, pilot sites 012 and 021).** `analyze` runs the non-content check on the capture snapshots only (`s01`…; a maintenance or error page the agent reached is a gate, `blocked_at: maintenance`, never the site's status); computes `content_signals` over every snapshot, landing and agent, one signal per name at its heaviest; adds `deposit_address_after_registration` (moderate, weight 1.5) when a primary address was shown on a deposit or logged-in page; and gives the judge the landing page (text and screenshot) **and** the agent's best page (the last deposit page with a primary address, else the last deposit page, else the last logged-in page, else the last non-landing page), with a line saying what the agent did. Before, it judged only the last snapshot: 012 fell from 0.96 to 0.44 on a 34-word payment page, and 021 was re-labelled `empty` from its `/register` maintenance page.
 
 ### 5.5 Navigation agent (`agent/`)
 
