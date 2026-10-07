@@ -5,7 +5,10 @@ Buckets, first match wins:
   address_on_landing   a validated, non-contract address is already in the landing snapshot
   wallet_gated         the visible text asks to connect a wallet and has no login/register wording
   registration_gated   login/register wording, or an account menu (Recharge, Withdraw, Assets…)
-  unclear              none of the above (shops, parked pages, content sites, trackers)
+  unclear              none of the above (shops, content sites, trackers)
+  non_content          checked FIRST: the rendered page is parked, expired, a directory listing,
+                       a maintenance page or stuck loading (pipeline.rendered_non_content, the
+                       detector the pipeline uses). Not counted in the effective live total.
 
 Only visible text is matched (raw HTML is full of SPA-bundle words). Every bucket carries the
 matched snippets, so each call can be checked by eye. Usage:
@@ -23,6 +26,7 @@ from scamhunter.browser.capture import load_snapshot_content, load_snapshots
 from scamhunter.extract.blocklist import load_blocklist
 from scamhunter.extract.extractor import extract
 from scamhunter.models import CryptoAddress
+from scamhunter.pipeline import rendered_non_content
 
 AUTH_WORDS = re.compile(
     r"\b(?:log ?in|sign ?in|sign ?up|register|create (?:an )?account)\b|登录|登錄|注册|註冊", re.I
@@ -81,6 +85,9 @@ def tally_run(run_dir: Path) -> list[SiteTally]:
         snapshots = load_snapshots(site_dir)
         if not snapshots:
             continue
+        if found := rendered_non_content(run_dir, snapshots):
+            out.append(SiteTally(site_dir.name, "non_content", [f"{found[0].value}: {found[1]}"]))
+            continue
         content = load_snapshot_content(snapshots[0], run_dir)  # the landing snapshot
         out.append(bucket_site(site_dir.name, content.visible_text, extract(content, blocklist)))
     return out
@@ -104,6 +111,8 @@ def main() -> None:
         counts[row.bucket] = counts.get(row.bucket, 0) + 1
         print(f"{row.site_id}  {row.bucket:<19} " + " | ".join(row.evidence))
     print(counts)
+    effective = len(rows) - counts.get("non_content", 0)
+    print(f"effective live sites (excluding non_content): {effective} of {len(rows)}")
 
 
 if __name__ == "__main__":

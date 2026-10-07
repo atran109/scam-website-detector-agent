@@ -186,3 +186,30 @@ def test_real_page_mentioning_parked_is_not_parked() -> None:
         + ("Our team parked the old branding.</p></body></html>")
     )
     assert classify_response(200, {}, body, URL)[0] == SiteStatus.LIVE
+
+
+@pytest.mark.parametrize(
+    ("body", "expected", "reason_part"),
+    [
+        # Texts and shapes taken from the capture-2 pages (LOG 2026-10-07).
+        (
+            page("<p>choxo.cc has expired and may be available at Dynadot auctions</p>"),
+            SiteStatus.PARKED,
+            "expired",
+        ),
+        (
+            page("<p>Error. Page cannot be displayed. Please contact your service provider.</p>"),
+            SiteStatus.PARKED,
+            "cloaking",
+        ),
+        (page("<h1>Index of /</h1><pre>Name Last Modified Size</pre>"), SiteStatus.EMPTY, "index"),
+        (page("<p>網站維護中</p>"), SiteStatus.EMPTY, "maintenance"),
+        (page("<p>Our site is under maintenance, back soon.</p>"), SiteStatus.EMPTY, "maintenance"),
+        # A real, long page that merely mentions maintenance stays live.
+        (page("<p>Scheduled maintenance tonight.</p>" + FILLER), SiteStatus.LIVE, "content"),
+    ],
+)
+def test_non_content_pages(body: str, expected: SiteStatus, reason_part: str) -> None:
+    got, reason = classify_response(200, {}, body, URL)
+    assert got == expected
+    assert reason_part in reason.lower()

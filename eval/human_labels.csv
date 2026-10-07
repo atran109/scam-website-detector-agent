@@ -1,0 +1,24 @@
+site_id,label,category,note
+004,parked_expired_empty,parklogic_parked,ParkLogic parked page
+029,parked_expired_empty,parklogic_parked,ParkLogic parked page
+036,parked_expired_empty,parklogic_parked,ParkLogic parked page
+044,parked_expired_empty,parklogic_parked,ParkLogic parked page
+139,parked_expired_empty,parklogic_parked,ParkLogic parked page
+073,parked_expired_empty,hostinger_parked,Hostinger parked page
+017,parked_expired_empty,expired_domain,"""has expired… Dynadot auctions"""
+054,parked_expired_empty,empty_directory_listing,"Empty ""Index of /"""
+079,parked_expired_empty,parked_or_cloaked,"Search/ads feed page. The tracking parameters suggest traffic filtering, but it may just be parking monetization."
+023,parked_expired_empty,maintenance,"Maintenance page, sibling domains (with 024)"
+024,parked_expired_empty,maintenance,"Maintenance page, sibling domains (with 023)"
+069,stuck_loading,loading_spinner,"Diamond loading spinner, same template as 096. The app never finished loading."
+096,stuck_loading,loading_spinner,"Diamond loading spinner, same template as 069. The app never finished loading."
+117,likely_scam,fake_exchange,"A BTCC clone in Traditional Chinese (""buy, store and explore crypto"") on a .help domain. Best pilot target."
+071,likely_scam,romance_lure,"A live-cam/dating landing page (""Vivixo Live"") on an openai9315 domain. Looks like a romance lure, which fits the pig-butchering funnel."
+145,likely_scam,fake_shop,A copy of friDay購物 (a Taiwanese shopping site) on a tatung-world domain: a fake shop.
+067,likely_scam,fake_shop,"A collectible coins shop, already known."
+003,likely_scam,unknown,"A corporate ""immigration services"" page with stock photos on a whisky domain. The mismatch is suspicious, but can't tell more."
+091,memecoin,token_page,"$TNJ, Tom and Jerry art"
+053,memecoin,token_page,$Learing
+051,probably_legit,shop,TCG deck boxes. Looks like an ordinary shop; no crypto involved.
+081,probably_legit,shop,"Rotterdam clothing. Looks like an ordinary shop; no crypto involved. Caveat: fake Dutch webshops are common, so looks normal is not proof."
+102,probably_legit,shop,"Dutch dog and home products. Looks like an ordinary shop; no crypto involved. Caveat: fake Dutch webshops are common, so looks normal is not proof."

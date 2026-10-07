@@ -1,12 +1,14 @@
 """Tests for URL loading (no network)."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
 from scamhunter.cli import URLS_PATH
-from scamhunter.pipeline import load_sites
+from scamhunter.models import DiscoveryStage, PageSnapshot, SiteStatus
+from scamhunter.pipeline import load_sites, rendered_non_content
 
 
 def test_real_url_list_loads_all_160_in_order() -> None:
@@ -89,3 +91,32 @@ def test_rendered_parking_page_takes_dead_site_path(tmp_path: Path) -> None:
     )
     assert analysis.classification.method == "status_rule"
     assert any("parking page" in n for n in analysis.notes)
+
+
+def _snapshot_with_html(tmp_path: Path, html: str) -> PageSnapshot:
+    snap_dir = tmp_path / "sites" / "069" / "snapshots" / "s01"
+    snap_dir.mkdir(parents=True)
+    (snap_dir / "page.html").write_text(html)
+    return PageSnapshot(
+        snapshot_id="s01",
+        stage=DiscoveryStage.LANDING,
+        url="https://spinner.example/#/",
+        title="",
+        taken_at=datetime.now(UTC),
+        html_path="sites/069/snapshots/s01/page.html",
+        visible_text="",
+        a11y_tree_path="",
+        screenshot_path="",
+        network=[],
+    )
+
+
+def test_blank_spa_after_retry_is_stuck_loading(tmp_path: Path) -> None:
+    html = "<html><body><div id=app></div><script src=app.js></script></body></html>"
+    found = rendered_non_content(tmp_path, [_snapshot_with_html(tmp_path, html)])
+    assert found is not None and found[0] == SiteStatus.EMPTY and "stuck loading" in found[1]
+
+
+def test_content_page_is_not_non_content(tmp_path: Path) -> None:
+    html = "<html><body><p>" + "Deposit USDT and earn daily. " * 120 + "</p></body></html>"
+    assert rendered_non_content(tmp_path, [_snapshot_with_html(tmp_path, html)]) is None

@@ -712,3 +712,36 @@ Full selftest 41/41 first. 56 live sites (per triage-1, 2026-10-04) captured: 56
 
 ## 2026-10-06 22:50 · H+? · RESULT: contact sheet of the 23 unclear sites
 - `eval/contact_sheet.py` builds `runs/capture-2/contact_sheet/index.html` (screenshots, ID, word count and chars, title, final URL of the last snapshot; CSP, no script, everything escaped). The 5 empty pages (069, 079, 096, 023, 024) come first. Word counts use whitespace splitting as the tally does, so CJK pages read low: 023 is "網站維護中" (site under maintenance), 5 characters and "1 word".
+
+## 2026-10-07 00:05 · H+? · PROBLEM [limit]: first capture-3 attempt visited nothing
+- The `--settle-ms` and `--mobile` options were never added to the CLI (my edit matched a line `ruff format` had already reflowed), so the container exited with "unrecognized arguments" after the selftest (41/41). No site was loaded. Fixed; rerun as `capture-4`. Lesson repeated from capture-1: the capture path has no end-to-end test short of a real run, so check the CLI wiring with `--help` first.
+
+## 2026-10-07 00:20 · H+? · FINDING [limit]: why the ParkLogic detector "missed" 004/029/036/044/139 in capture-2: it never ran
+- Offline, `classify_response` on the saved capture-2 pages flags all five as parked (`parking provider fingerprint "parklogic"`), and 073 too (`parked marker "parked domain"`). The M2 detector was fine. The cause is mine: `rendered_parked` ran only inside `process_site`/`analyze`, and capture-only mode (22:00 entry) stops after `capture_site`, so no capture-2 site was ever status-checked. The tally was therefore counting non-content pages as "unclear".
+- Genuinely not covered by the detector before today: 017 (expired page via an ad feed), 054 ("Index of /"), 079 (error stub), 023/024 (maintenance), 069/096 (stuck SPA).
+
+## 2026-10-07 00:20 · H+? · DECISION [arch] (user): parked, expired, empty and maintenance pages get a non-content status and take the dead-site policy
+- User's labels (see `eval/human_labels.csv`). Implemented in `triage/liveness.py` (`classify_response`): `"has expired and may be available"` → PARKED; the ad-feed stub `"page cannot be displayed. please contact your service provider"` → PARKED with reason "(parking monetization or cloaking)" (079, the user's call: treat as parked, possibly cloaking); `"index of /"` → EMPTY (directory listing); maintenance phrases (`under maintenance`, `網站維護中`, …) → EMPTY. All only on short pages (< 3000 chars of text) so a real site that mentions maintenance stays live.
+- **`pipeline.rendered_non_content(run_dir, snapshots)`** replaces `rendered_parked` and `mark_parked` → `mark_non_content` (used by `analyze` and `process_site`, and now by capture-only runs, which record `non_content` and `non_content_reason` in `capture.jsonl`). It also returns EMPTY "page never rendered content (stuck loading)" when the last snapshot is still an SPA shell (under 50 chars of text, scripts present), i.e. after capture's desktop-then-mobile retry. This changes the pipeline: such a site no longer reaches the LLM judge on a blank page; it goes to Wayback, then the signals-only rule.
+- Check on all 56 saved capture-2 pages: exactly the 13 expected sites are flagged (004, 017, 023, 024, 029, 036, 044, 054, 069, 073, 079, 096, 139), no other live site (0 false positives of 43). 8 new unit tests.
+- Rejected: a new `SiteStatus.MAINTENANCE` (an output-contract change; EMPTY with a reason fits "a placeholder, not the site"; DESIGN §3 untouched, §5.2a line edited); hard-coding site IDs for 079 (rule-based or nothing); re-running the five "Redirecting..." sites (they are ParkLogic pages).
+- Risk: a maintenance or "index of /" phrase on a short page that is a real scam under a maintenance banner would be dropped to the dead-site rule; acceptable because a banner has no deposit flow to find.
+- Not run on triage: the HTTP triage (`triage-1`) predates these phrases; a fresh triage would label 017/054/023/024 directly.
+
+## 2026-10-07 00:20 · H+? · RESULT [limit]: 069 and 096 retried (`capture-4`, selftest 41/41): still stuck loading
+- `scamhunter capture --only 69,96 --settle-ms 30000 --mobile`: mobile viewport and mobile user agent first, 30 s network-idle wait (was 8 s, plus 1.5 s). Both loaded the page (HTTP 200) and both still show the diamond spinner with 0 words of text; `rendered_non_content` marks both EMPTY "stuck loading". Each took about 35 s.
+- Network record, identical to capture-2: 43 (069) and 38 (096) scripts, 19–23 stylesheets, 1–2 media files, all 200/206, and **no request to the site's own backend** (the only XHR is Cloudflare's `cdn-cgi/rum`). So the app bundle ran and never called its API. Cause unknown: candidates are a JS error, a geo/IP or environment check, or waiting on something we do not provide. Not pursued (no console capture exists; not retried again).
+- Not tried: a residential-looking region, other user agents or a longer wait than 30 s. Both are now `empty` through the dead-site policy; the hand label stays `stuck_loading`.
+
+## 2026-10-07 00:20 · H+? · DECISION [arch]: `eval/human_labels.csv` holds the user's 23 hand labels, ground truth for M4
+- Columns `site_id,label,category,note`. `label` is the user's group (`parked_expired_empty` 11, `stuck_loading` 2, `likely_scam` 5, `memecoin` 2, `probably_legit` 3); `category` is the sub-type read from the table; `note` is the user's wording, with the caveats kept (079 may be parking monetization; the three shops 051/081/102 look normal but fake Dutch webshops are common; 003 suspicious but unclear). These are the user's reading of screenshots, not verified scam/not-scam verdicts: "likely" and "probably" stay in the labels, so M4 should not score them as certain. `eval/labels.csv` (the scam-feed labels) is untouched; `evaluate.py` does not read the new file yet.
+
+## 2026-10-07 00:20 · H+? · RESULT: tally recomputed, non-content sites excluded
+`eval/live_tally.py runs/capture-2 --triage runs/triage-1/triage.jsonl` (non-content checked first, same detector as the pipeline): **effective live sites: 43 of 56** (13 non-content: 6 parked by ParkLogic or Hostinger (004, 029, 036, 044, 139, 073), 017 expired, 079 ad-feed stub, 054 empty directory, 023/024 maintenance, 069/096 stuck loading).
+| bucket | n (of 43) |
+|---|---|
+| registration-gated | 27 |
+| address on landing | 5 (031 and 078 are token pages; 031's 134 primary addresses are the `lpAddress` tiering bug, 22:50 entry) |
+| unclear | 10 (003, 051, 053, 067, 071, 081, 091, 102, 117, 145) |
+| wallet-gated | 1 (055) |
+- So 27 of 43 (63%) are registration-gated; wallet-gated is still 1 (2%); unclear is down from 23 to 10, and those 10 are the sites the user labelled (5 likely scam, 2 memecoin, 3 probably legit).

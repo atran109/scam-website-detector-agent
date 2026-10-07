@@ -56,7 +56,7 @@ from scamhunter.models import (
 )
 from scamhunter.report.screenshots import highlight_address
 from scamhunter.store import write_jsonl
-from scamhunter.triage.liveness import classify_response, make_client, probe
+from scamhunter.triage.liveness import SPA_SHELL_REASON, classify_response, make_client, probe
 
 PIPELINE_VERSION = "0.2.0"
 
@@ -144,6 +144,8 @@ class RunContext:
     brands: list[BrandToken] = field(default_factory=load_brands)
     proxy: str | None = None
     browser: Browser | None = None
+    settle_ms: int = 8000  # how long to wait for network idle before a snapshot
+    force_mobile: bool = False  # load every site with the mobile viewport and user agent first
 
     def site_dir(self, site: Site) -> Path:
         return self.run_dir / "sites" / site.site_id
@@ -206,7 +208,13 @@ async def _open_and_snapshot(
         loaded = response is not None
         index = first_index
         snap = await take_snapshot(
-            page, recorder, DiscoveryStage.LANDING, f"s{index:02d}", site_dir, ctx.run_dir
+            page,
+            recorder,
+            DiscoveryStage.LANDING,
+            f"s{index:02d}",
+            site_dir,
+            ctx.run_dir,
+            network_idle_ms=ctx.settle_ms,
         )
         snapshots.append(snap)
         text = (ctx.run_dir / snap.html_path).parent.joinpath("text.txt").read_text()
@@ -270,7 +278,7 @@ async def _highlight_new_addresses(
 async def capture_site(
     ctx: RunContext, site: Site, triage: TriageResult, *, click_interstitial: bool = True
 ) -> Capture:
-    mobile = _is_mobile(ctx.settings, site.url)
+    mobile = ctx.force_mobile or _is_mobile(ctx.settings, site.url)
     capture, empty_shell = await _open_and_snapshot(
         ctx, site, triage, mobile=mobile, first_index=1, click_interstitial=click_interstitial
     )
@@ -338,25 +346,33 @@ class Analysis:
     triage: TriageResult | None = None  # set when analysis revised the triage status (parked)
 
 
-def rendered_parked(ctx: RunContext, snapshots: list[PageSnapshot]) -> str | None:
-    """Reason if the last rendered snapshot is a parking page. HTTP triage can't see these:
-    many sit behind a JS redirect (the probe gets a "Redirecting..." stub), so the rendered
-    page is checked with triage's own detector."""
+def rendered_non_content(
+    run_dir: Path, snapshots: list[PageSnapshot]
+) -> tuple[SiteStatus, str] | None:
+    """(status, reason) if the last rendered snapshot is not the site's content, else None.
+    HTTP triage can't see these: parking pages often sit behind a JS redirect (the probe gets a
+    "Redirecting..." stub), and an SPA that never renders looks live. The rendered page is
+    checked with triage's own detector. Parked, expired, directory-listing and maintenance pages
+    come from it; a page still blank after capture's mobile retry is "stuck loading" (EMPTY)."""
     if not snapshots:
         return None
     last = snapshots[-1]
-    html = (ctx.run_dir / last.html_path).read_text()
+    html = (run_dir / last.html_path).read_text()
     status, reason = classify_response(200, {}, html, last.url)
-    return reason if status == SiteStatus.PARKED else None
+    if status in (SiteStatus.PARKED, SiteStatus.EMPTY):
+        return status, reason
+    if status == SiteStatus.LIVE and reason == SPA_SHELL_REASON:
+        return SiteStatus.EMPTY, "page never rendered content (stuck loading)"
+    return None
 
 
-def mark_parked(triage: TriageResult, reason: str) -> TriageResult:
-    return triage.model_copy(
-        update={
-            "status": SiteStatus.PARKED,
-            "reason": f"rendered page is a parking page: {reason}",
-        }
-    )
+def non_content_note(status: SiteStatus, reason: str) -> str:
+    what = "a parking page" if status == SiteStatus.PARKED else "a page with no content"
+    return f"rendered page is {what} ({reason})"
+
+
+def mark_non_content(triage: TriageResult, status: SiteStatus, reason: str) -> TriageResult:
+    return triage.model_copy(update={"status": status, "reason": non_content_note(status, reason)})
 
 
 def _has_content(ctx: RunContext, snapshots: list[PageSnapshot]) -> bool:
@@ -381,9 +397,9 @@ async def analyze(
     usage = TokenUsage()
     notes: list[str] = []
     revised: TriageResult | None = None
-    if parked := rendered_parked(ctx, snapshots):
-        revised = triage = mark_parked(triage, parked)
-        notes.append(f"rendered page is a parking page ({parked}): dead-site rule applies")
+    if found := rendered_non_content(ctx.run_dir, snapshots):
+        revised = triage = mark_non_content(triage, *found)
+        notes.append(f"{non_content_note(*found)}: dead-site rule applies")
         snapshots = []
     base_signals = domain_signals(site.host, site.registrable_domain, ctx.brands) + triage_signals(
         triage
@@ -591,10 +607,10 @@ async def process_site(ctx: RunContext, site: Site, triage: TriageResult) -> Sit
                 notes.append(f"Chromium recheck also failed ({triage.status.value})")
                 snapshots = []
 
-    if parked := rendered_parked(ctx, snapshots):
-        # Dead-site policy: a parking page is no evidence about the site, so try Wayback next.
-        triage = mark_parked(triage, parked)
-        notes.append(f"rendered page is a parking page ({parked})")
+    if found := rendered_non_content(ctx.run_dir, snapshots):
+        # Dead-site policy: a parked or empty page is no evidence about the site, so try Wayback.
+        triage = mark_non_content(triage, *found)
+        notes.append(non_content_note(*found))
         snapshots = []
 
     if not snapshots and ctx.settings.features.archive_fallback:
@@ -694,7 +710,12 @@ async def run_pipeline(
 
 
 async def run_capture_only(
-    settings: Settings, sites: list[Site], run_dir: Path
+    settings: Settings,
+    sites: list[Site],
+    run_dir: Path,
+    *,
+    settle_ms: int = 8000,
+    force_mobile: bool = False,
 ) -> list[dict[str, object]]:
     """Evidence only: for each site triage called live, load the landing page (desktop, plus the
     mobile retry for an empty shell) and save snapshot, HTML, text and network log. No clicks, no
@@ -709,7 +730,15 @@ async def run_capture_only(
         browser = await launch_browser(pw, proxy)
         # The context needs an LLM client by type; nothing here ever calls it.
         llm = LLMClient(settings.llm.gateway_url)
-        ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm, proxy=proxy, browser=browser)
+        ctx = RunContext(
+            settings=settings,
+            run_dir=run_dir,
+            llm=llm,
+            proxy=proxy,
+            browser=browser,
+            settle_ms=settle_ms,
+            force_mobile=force_mobile,
+        )
 
         async def one(site: Site) -> None:
             started = datetime.now(UTC)

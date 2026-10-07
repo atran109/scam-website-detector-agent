@@ -79,7 +79,9 @@ def cmd_capture(args: argparse.Namespace) -> int:
     out = run_dir(args.run_id or new_run_id())
     if not (out / "triage.jsonl").exists():
         shutil.copyfile(RUNS_DIR / args.triage_from / "triage.jsonl", out / "triage.jsonl")
-    rows = asyncio.run(run_capture_only(settings, sites, out))
+    rows = asyncio.run(
+        run_capture_only(settings, sites, out, settle_ms=args.settle_ms, force_mobile=args.mobile)
+    )
     errors = [r for r in rows if "error" in r]
     print(f"\n{len(rows)} captured, {len(errors)} errors → {out}/capture.jsonl")
     return 0
@@ -197,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     capture.add_argument("--run-id", help="run directory name (default: timestamp)")
     capture.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
+    capture.add_argument("--settle-ms", type=int, default=8000, help="network-idle wait per page")
+    capture.add_argument("--mobile", action="store_true", help="mobile viewport and UA first")
     capture.add_argument(
         "--triage-from", default="triage-1", help="run id whose triage.jsonl to use"
     )

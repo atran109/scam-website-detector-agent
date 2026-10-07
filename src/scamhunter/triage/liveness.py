@@ -114,6 +114,21 @@ PARKED_PHRASES = (
     "domain is available for purchase",
     "inquire about this domain",
     "make an offer on this domain",
+    "has expired and may be available",  # registrar auction page (e.g. Dynadot via an ad feed)
+)
+# A generic browser-style error shown to automated visitors by parking/ad-feed pages that carry
+# tracking parameters. Parking monetization and traffic filtering (cloaking) look the same from
+# here, so the reason says both.
+AD_FEED_ERROR_STUBS = ("page cannot be displayed. please contact your service provider",)
+# A placeholder, not the site: nothing to judge, so it takes the dead-site route (status EMPTY).
+MAINTENANCE_PHRASES = (
+    "under maintenance",
+    "down for maintenance",
+    "maintenance mode",
+    "網站維護中",
+    "网站维护中",
+    "系統維護中",
+    "系统维护中",
 )
 # Parking providers recognizable by script or host, on any page length.
 # ParkLogic's page ("This page has been created by ParkLogic.") is usually reached through a
@@ -157,9 +172,11 @@ DEFAULT_PAGE_PHRASES = (
     "web server's default page",
     "恭喜，站点创建成功",  # BaoTa panel default page, common on cheap Asian hosting
     "site created successfully",
+    "index of /",  # empty web-server directory listing
 )
 
 BLANK_PAGE_CHARS = 50
+SPA_SHELL_REASON = "little static text but has scripts (likely SPA shell)"
 
 _SCRIPT_STYLE = re.compile(r"<(script|style|noscript)\b.*?</\1\s*>", re.S | re.I)
 _TAG = re.compile(r"<[^>]+>")
@@ -212,6 +229,8 @@ def classify_response(
         return SiteStatus.PARKED, f'parking provider fingerprint "{m}"'
     if short and (m := _first_match(lowered, PARKED_PHRASES)):
         return SiteStatus.PARKED, f'parked marker "{m}"'
+    if short and (m := _first_match(lowered, AD_FEED_ERROR_STUBS)):
+        return SiteStatus.PARKED, f'ad-feed error stub "{m}" (parking monetization or cloaking)'
 
     if http_status == 402:  # "payment required": hosting/store account unpaid (e.g. Shopify)
         return SiteStatus.SUSPENDED, "HTTP 402 (hosting/store suspended)"
@@ -220,9 +239,11 @@ def classify_response(
 
     if short and (m := _first_match(lowered, DEFAULT_PAGE_PHRASES)):
         return SiteStatus.EMPTY, f'default server page "{m}"'
+    if short and (m := _first_match(lowered, MAINTENANCE_PHRASES)):
+        return SiteStatus.EMPTY, f'maintenance placeholder "{m}"'
     if len(text) < BLANK_PAGE_CHARS:
         if "<script" in lowered:
-            return SiteStatus.LIVE, "little static text but has scripts (likely SPA shell)"
+            return SiteStatus.LIVE, SPA_SHELL_REASON
         return SiteStatus.EMPTY, "blank page"
 
     return SiteStatus.LIVE, "content page"
