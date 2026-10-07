@@ -46,6 +46,7 @@ from scamhunter.llm.client import LLMClient, LLMError, TokenUsage
 from scamhunter.llm.sanitize import untrusted
 from scamhunter.models import (
     ActionType,
+    AddressFormat,
     AddressTier,
     AgentAction,
     AgentStep,
@@ -164,6 +165,27 @@ class AgentRun:
     call_usage: list[dict[str, int]] = field(default_factory=list)  # API usage per step
 
 
+# EVM target assets by the coin named beside an EVM address on a deposit page. An EVM address shown
+# for USDT or USDC counts as the ERC-20 one (the targets' only EVM network; the same address also
+# works on BEP-20, which is not a target). Case-sensitive tickers, so "eth" in a word is not ETH.
+_EVM_COIN = {
+    "ETH": re.compile(r"(?<![A-Za-z])ETH(?![A-Za-z])|\bEthereum \(ETH\)"),
+    "USDT-ERC20": re.compile(r"(?<![A-Za-z])USDT"),
+    "USDC-ERC20": re.compile(r"(?<![A-Za-z])USDC"),
+}
+NEAR_ADDRESS_CHARS = 300
+
+
+def evm_assets_named_near(text: str, address: str) -> set[str]:
+    """Target keys whose coin is named within NEAR_ADDRESS_CHARS of the address in the visible
+    text. Nothing if the address is not in the visible text (an attribute-only sighting)."""
+    at = text.lower().find(address.lower())
+    if at < 0:
+        return set()
+    window = text[max(0, at - NEAR_ADDRESS_CHARS) : at + len(address) + NEAR_ADDRESS_CHARS]
+    return {key for key, coin in _EVM_COIN.items() if coin.search(window)}
+
+
 def asset_keys(address: CryptoAddress) -> set[str]:
     """Target-asset keys ("BTC", "USDT-TRC20", …) an address counts toward."""
     keys = set()
@@ -213,6 +235,9 @@ class Evidence:
         self.recorder = NetworkRecorder(site_dir, run_dir)
         self.recorder.attach(page)
         self.addresses: list[CryptoAddress] = []
+        self.last_found: list[CryptoAddress] = []  # every address on the latest snapshot
+        self.last_text = ""  # the latest snapshot's visible text
+        self.last_stage = DiscoveryStage.LANDING
         self._count = 0
         self._highlights_path = site_dir / "highlights.json"
 
@@ -228,7 +253,9 @@ class Evidence:
             self.run_dir,
             network_idle_ms=SNAPSHOT_IDLE_MS,
         )
-        found = extract(load_snapshot_content(snapshot, self.run_dir), self.blocklist)
+        content = load_snapshot_content(snapshot, self.run_dir)
+        found = extract(content, self.blocklist)
+        self.last_found, self.last_text, self.last_stage = found, content.visible_text, stage
         known = {a.dedupe_key for a in self.addresses}
         new = [a for a in found if a.dedupe_key not in known]
         self.addresses = merge_all(self.addresses, found)
@@ -505,6 +532,7 @@ class NavigationLoop:
                 stage = DiscoveryStage.DEPOSIT_PAGE
             screenshot, new = await self.evidence.capture(stage)
             self._count_found(new, turn)
+            self._count_shared_evm(turn)
             new_addresses = [a.address for a in new]
             for step in self.steps[recorded_from:]:
                 if step.allowed:
@@ -734,6 +762,24 @@ class NavigationLoop:
         if action.type == ActionType.CLICK and element and state.facts.is_deposit_page:
             if COIN_OR_NETWORK.search(element.name) and element.name not in self.assets_tried:
                 self.assets_tried.append(element.name[:40])
+
+    def _count_shared_evm(self, turn: int) -> None:
+        """One EVM address often serves ETH and every ERC-20 token. Each time a deposit page
+        shows a primary EVM address, the EVM target assets named next to it on that page count
+        as found (2026-10-07: pilot site 012 showed one address for ETH, USDT and USDC, but its
+        labels stayed at 0.4, so coverage never counted them and the agent kept cycling)."""
+        if self.evidence.last_stage != DiscoveryStage.DEPOSIT_PAGE:
+            return
+        for address in self.evidence.last_found:
+            if address.tier != AddressTier.PRIMARY or address.format != AddressFormat.EVM:
+                continue
+            keys = evm_assets_named_near(self.evidence.last_text, address.address)
+            keys &= set(self.limits.target_assets)
+            if keys and self.first_address_turn is None:
+                self.first_address_turn = turn
+            self.found |= keys
+        if self.full_coverage_turn is None and set(self.limits.target_assets) <= self.found:
+            self.full_coverage_turn = turn
 
     def _count_found(self, new: list[CryptoAddress], turn: int) -> None:
         for address in new:
