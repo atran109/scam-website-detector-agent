@@ -2,6 +2,7 @@
 
 import re
 
+from scamhunter.classify.domain import name_label
 from scamhunter.models import Signal, SignalTier, TriageResult
 
 WEIGHTS = {SignalTier.STRONG: 3.0, SignalTier.MODERATE: 1.5, SignalTier.WEAK: 0.5}
@@ -170,6 +171,73 @@ def crypto_only_payments(text: str) -> Signal | None:
     return None
 
 
+# The cheap exchange / H5 app kits (pilot sites 057, 099, 100): an app-style menu. The words are
+# the distinctive ones; "Contract", "Assets", "Team" and "Follow" also occur on ordinary token
+# pages (027 has all four) and are left out. Four distinct words, not any one: 100 and 099 have
+# five, 057 four; of 56 live sites no other has more than three.
+MOBILE_EXCHANGE_WORDS = (
+    "Recharge",
+    "Withdraw",
+    "Finance",
+    "Loan",
+    "Service",
+    "AI Quant",
+    "Chat Room",
+    "Connect Wallet",
+)
+MOBILE_EXCHANGE_MIN = 4
+
+
+def mobile_exchange_template(visible_text: str) -> Signal | None:
+    found = [
+        w
+        for w in MOBILE_EXCHANGE_WORDS
+        if re.search(rf"(?<![A-Za-z]){re.escape(w)}(?![A-Za-z])", visible_text, re.I)
+    ]
+    if len(found) < MOBILE_EXCHANGE_MIN:
+        return None
+    return Signal(
+        name="mobile_exchange_template",
+        tier=SignalTier.MODERATE,
+        weight=WEIGHTS[SignalTier.MODERATE],
+        evidence=f"app-style exchange menu: {', '.join(found)}",
+        source="content",
+    )
+
+
+_TITLE = re.compile(r"<title[^>]*>(.*?)</title\s*>", re.I | re.S)
+MISMATCH_MIN_WORDS = 40  # a page with little text says little about its name
+MISMATCH_TEXT_CHARS = 4000
+
+
+def domain_content_mismatch(host: str, title: str, visible_text: str) -> Signal | None:
+    """The domain's name appears nowhere in the page's title or text (pilot site 003:
+    `addmklwhisky.com` serves an immigration-consultancy site). A token of the name counts as
+    present if the token, or any 4-letter piece of a token shorter than 8 letters (5 for
+    longer ones), is in the page text. Weak: legitimate sites show their logo as an image, and
+    a clone of a real brand's page names that brand (117: btcctw.help says BTCC)."""
+    if len(visible_text.split()) < MISMATCH_MIN_WORDS:
+        return None
+    label = name_label(host)
+    tokens = [t for t in re.split(r"[^a-z]+", label.lower()) if len(t) >= 4]
+    if not tokens:
+        return None
+    haystack = re.sub(r"[^a-z0-9]", "", f"{title} {visible_text[:MISMATCH_TEXT_CHARS]}".lower())
+    for token in tokens:
+        size = 4 if len(token) < 8 else 5
+        if token in haystack or any(
+            token[i : i + size] in haystack for i in range(len(token) - size + 1)
+        ):
+            return None
+    return Signal(
+        name="domain_content_mismatch",
+        tier=SignalTier.WEAK,
+        weight=WEIGHTS[SignalTier.WEAK],
+        evidence=f'the name "{label}" appears nowhere in the page title or text',
+        source="content",
+    )
+
+
 def content_signals(visible_text: str, html: str, host: str) -> list[Signal]:
     signals: list[Signal] = []
     for name, tier, pattern in TEXT_RULES:
@@ -185,6 +253,12 @@ def content_signals(visible_text: str, html: str, host: str) -> list[Signal]:
             )
     if crypto_only := crypto_only_payments(visible_text):
         signals.append(crypto_only)
+    if template := mobile_exchange_template(visible_text):
+        signals.append(template)
+    title_match = _TITLE.search(html)
+    title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else ""
+    if mismatch := domain_content_mismatch(host, title, visible_text):
+        signals.append(mismatch)
     if (m := _SEED_INPUT.search(html)) and not host.endswith(_WALLET_PROVIDERS):
         signals.append(
             Signal(

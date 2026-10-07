@@ -1,11 +1,13 @@
 """Content-signal detectors, tested on texts saved from the pilot run (tests/fixtures/pilot_texts)
 plus negatives that must stay quiet."""
 
+import json
 from pathlib import Path
 
 import pytest
 
 from scamhunter.classify.signals import content_signals, crypto_only_payments
+from scamhunter.models import SignalTier
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pilot_texts"
 
@@ -93,3 +95,67 @@ def test_crypto_only_payments_needs_non_crypto_product_and_no_fiat_option() -> N
     # a ticker widget naming Visa far from the deposit text must not
     far = "Trade stocks. " + crypto + (" filler" * 80) + " Visa 360.66 +0.81 (+0.2%)"
     assert crypto_only_payments(far)
+
+
+# ---------- M4 (2026-10-07): mobile exchange template and domain/content mismatch ----------
+
+
+def test_mobile_exchange_template_on_the_real_kit_pages() -> None:
+    from scamhunter.classify.signals import mobile_exchange_template
+
+    for site_id in ("100", "057"):  # 5 and 4 of the distinctive words
+        signal = mobile_exchange_template(pilot(site_id))
+        assert signal is not None and signal.tier == SignalTier.MODERATE, site_id
+    assert "AI Quant" in mobile_exchange_template(pilot("100")).evidence
+
+
+@pytest.mark.parametrize("site_id", ["012", "021", "022", "027", "051", "087"])
+def test_no_template_signal_on_ordinary_pages(site_id: str) -> None:
+    """027 has Contract, Assets, Team and Follow (generic words, left out of the cluster); 087 has
+    Finance, Service and Team."""
+    from scamhunter.classify.signals import mobile_exchange_template
+
+    assert mobile_exchange_template(pilot(site_id)) is None
+
+
+def test_one_cluster_word_is_not_a_template() -> None:
+    from scamhunter.classify.signals import mobile_exchange_template
+
+    assert mobile_exchange_template("Connect Wallet to continue. Withdraw anytime.") is None
+    assert mobile_exchange_template("Recharge Withdraw Finance Loan") is not None
+
+
+CAPTURES = json.loads((Path(__file__).parent / "fixtures" / "capture_pages.json").read_text())
+
+
+@pytest.mark.parametrize("site_id", ["003", "145", "071"])
+def test_the_mismatch_signal_fires_on_the_labelled_scam_pages(site_id: str) -> None:
+    """003 an immigration site on a whisky name, 145 a friday購物 clone on tatung-world.com, 071 a
+    live-cam page on openai9315.com (the user's hand labels, eval/human_labels.csv)."""
+    from scamhunter.classify.signals import domain_content_mismatch
+
+    page = CAPTURES[site_id]
+    signal = domain_content_mismatch(page["host"], page["title"], page["text"])
+    assert signal is not None and signal.tier == SignalTier.WEAK and signal.weight == 0.5
+
+
+@pytest.mark.parametrize("site_id", ["051", "081", "102", "117"])
+def test_the_mismatch_signal_stays_quiet_on_normal_shops_and_a_brand_clone(site_id: str) -> None:
+    """051, 081 and 102 are the user's three probably-legitimate shops; 117 is a BTCC clone whose
+    page does say BTCC (a clone matches its brand, so no mismatch)."""
+    from scamhunter.classify.signals import domain_content_mismatch
+
+    page = CAPTURES[site_id]
+    assert domain_content_mismatch(page["host"], page["title"], page["text"]) is None
+
+
+def test_mismatch_needs_enough_text_and_uses_the_subdomain_on_free_hosting() -> None:
+    from scamhunter.classify.domain import name_label
+    from scamhunter.classify.signals import domain_content_mismatch
+
+    assert domain_content_mismatch("unrelatedname.com", "", "a few words only") is None
+    assert name_label("drops-marketplace.netlify.app") == "drops-marketplace"
+    assert name_label("www.addmklwhisky.com") == "addmklwhisky"
+    assert name_label("m.bit-ligne.sbs") == "bit-ligne"
+    text = "Drops marketplace lists new token launches every day. " * 10
+    assert domain_content_mismatch("drops-marketplace.netlify.app", "Drops", text) is None

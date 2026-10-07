@@ -86,3 +86,36 @@ def test_three_letter_brands_never_fuzzy() -> None:
     assert brand_names("okz.com") == set()
     assert brand_names("xtc.com") == set()
     assert brand_names("okxtrade.com") == {"brand_in_domain:okx"}
+
+
+# ---------- random-looking domains and non-English names (M4, LOG 2026-10-07) ----------
+
+LEGIT_NON_ENGLISH = (
+    # pinyin, Korean, Japanese romanizations and a few English words that read as open syllables
+    "taobao zhihu xunlei youku kakao pekao yahoo baidu weibo xiaomi huawei meituan douyin kuaishou "
+    # Dutch, Vietnamese, German, Turkish: never flagged by the letter-pair test
+    "marktplaats kruidvat coolblue renega varumi vietcombank techcombank thegioididong "
+    "sparkasse volksbank lufthansa hepsiburada trendyol"
+).split()
+
+
+def test_real_non_english_names_are_not_random_looking() -> None:
+    from scamhunter.classify.domain import random_domain_reason
+
+    assert [n for n in LEGIT_NON_ENGLISH if random_domain_reason(f"{n}.com")] == []
+
+
+def test_the_machine_made_names_of_the_url_list_are_still_flagged() -> None:
+    """Names from data/urls.txt that are not open-syllable words; the syllable exemption must
+    not hide them (feyru and rexiqok read almost like words)."""
+    from scamhunter.classify.domain import random_domain_reason
+
+    names = "bqpxaf byexdd bitxex nexcofxs twatfx coinexvto coinruq feyru rexiqok zfxfa yqeydfhr"
+    assert [n for n in names.split() if not random_domain_reason(f"{n}.com")] == []
+
+
+def test_an_abbreviation_is_a_known_false_positive() -> None:
+    """pkobp (a Polish bank's initials) has no syllable structure; accepted, the signal is weak."""
+    from scamhunter.classify.domain import random_domain_reason
+
+    assert random_domain_reason("pkobp.pl") is not None

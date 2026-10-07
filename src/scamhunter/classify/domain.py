@@ -4,11 +4,14 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import tldextract
 import yaml
 
 from scamhunter.classify.bigrams import COLS, LOGP, ROWS
 from scamhunter.config import REPO_ROOT
 from scamhunter.models import Signal, SignalTier
+
+_extract = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)  # offline: bundled list
 
 CHEAP_TLDS = {
     "xyz",
@@ -127,6 +130,21 @@ def _edit_distance(a: str, b: str) -> int:
     return prev[-1]
 
 
+def name_label(host: str) -> str:
+    """The label that names the site: the registrable domain's own label ("addmklwhisky" for
+    www.addmklwhisky.com), or on free hosting the subdomain ("drops-marketplace" for
+    drops-marketplace.netlify.app). Used by the domain/content mismatch signal."""
+    host = host.lower().removeprefix("www.")
+    for suffix in FREE_HOSTING:
+        if host.endswith("." + suffix):
+            return host[: -len(suffix) - 1].split(".")[-1]
+    parts = _extract(host)
+    if not parts.suffix:  # an unknown suffix (a test host): the label before the last one
+        labels = host.split(".")
+        return labels[-2] if len(labels) > 1 else labels[0]
+    return parts.domain or host.split(".")[0]
+
+
 def _site_names(host: str, registrable_domain: str) -> list[tuple[str, bool]]:
     """Labels that name the site, each flagged when it is the registrable label (the only place
     a label equal to a brand may be the real brand). On free hosting the provider's own labels
@@ -213,6 +231,14 @@ def _bigram_score(letters: str) -> float:
     return total / (len(padded) - 1)
 
 
+# A name made only of open syllables: an initial (one consonant, or the pinyin digraphs zh, ch,
+# sh), one to three vowels, and optionally a final n, ng or r. Pinyin (taobao, zhihu, xunlei,
+# youku), Japanese and Korean romanizations (kakao) and some English (yahoo) read this way; the
+# machine-made names of the URL list do not (feyru, rexiqok, zfxfa, bqpxaf all fail it). Only the
+# letter-pair test is waived for such names (M4, LOG 2026-10-07); no-vowel names stay flagged.
+_OPEN_SYLLABLES = re.compile(r"(?:(?:zh|ch|sh|[bcdfghjklmnpqrstwxyz])?[aeiou]{1,3}(?:ng|n|r)?)+")
+
+
 def random_domain_reason(registrable_domain: str) -> str | None:
     """Why the domain label looks machine-generated, or None. Deliberately conservative: it
     flags digits mixed into letters and clear letter-pair outliers. Pronounceable made-up names
@@ -234,7 +260,7 @@ def random_domain_reason(registrable_domain: str) -> str | None:
             vowels = sum(c in "aeiou" for c in letters) / len(letters)
             if vowels <= MAX_VOWEL_RATIO:
                 return f'"{part}" has almost no vowels'
-        if len(letters) >= MIN_ALPHA_FOR_BIGRAMS:
+        if len(letters) >= MIN_ALPHA_FOR_BIGRAMS and not _OPEN_SYLLABLES.fullmatch(letters):
             score = _bigram_score(letters)
             if score < BIGRAM_THRESHOLD:
                 return f'"{part}" has letter pairs no English word uses ({score:.1f})'
