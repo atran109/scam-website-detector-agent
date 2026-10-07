@@ -43,10 +43,12 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - Random-looking-domain signal from an English letter-pair table.
 - Read-only HTML review page with a strict CSP for hand labelling from saved evidence.
 - Multiple asset/network labels per address (one 0x address for ETH + USDT-ERC20).
+- Capture-only mode (`make capture`): landing evidence for every live site with no clicks, agent or model calls, used to tally gate types before spending on the pilot.
 - Prompt-injection defence in code: nonce-delimited untrusted blocks, and a policy that ignores what the model "wants".
 
 ## With more time
-- Mock wallet (`window.ethereum` that refuses to sign) once wallet-gated sites are counted (1 of 13 saved live sites so far; decision pending the pilot tally).
+- Mock wallet (`window.ethereum` that refuses to sign): cut from v1 because only 1 of 56 live sites (2%) is wallet-gated on a landing-page tally; wallet-gated sites end `blocked_at: wallet_required`. Worth building if a larger or later sample shows more, since a modal-gated site may hide more than the landing page shows.
+- Group sites by shared template: 9 of the 56 live sites (125, 128-130, 141-142, 150-152) share one Chinese-language shop template, so they probably come from few operators. Clustering on template/HTML structure would cut duplicate work and give TRM operator-level leads.
 - Stagehand `ElementProvider` trial if element finding dominates the pilot's failure tally.
 - Residential/regional proxies to separate geo-blocking from dead sites.
 - Domain/content mismatch signal; mobile-exchange template signal; dead-site rule (a)/(b) decided from live-site base rates.
@@ -59,7 +61,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - Parts of the brand list were built while reviewing this URL list; brand hits overstate how well the signal generalizes.
 - Pronounceable made-up domains are not caught by the random-domain signal.
 - Element list covers the main frame only (no iframes or shadow DOM); `click_at` is the fallback.
-- mail.tm not yet exercised against the live API at M3 (TODO(M6) result).
+- mail.tm verified live through the proxy (create, poll, read one plain-text message, 2026-10-06); not tested: rate limits, token expiry, mail with codes or links from a real site.
 - Classification lean toward recall: precision/recall trade-off TODO(M6).
 - Navigation heuristics (`logged_in`, coverage by label confidence) can misjudge unusual sites.
 

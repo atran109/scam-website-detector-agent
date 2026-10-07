@@ -135,7 +135,7 @@ def status_counts(records: list[TriageRecord]) -> Counter[str]:
 # ============================================================
 
 
-@dataclass
+@dataclass(kw_only=True)
 class RunContext:
     settings: Settings
     run_dir: Path
@@ -172,10 +172,17 @@ class Capture:
 
 
 async def _open_and_snapshot(
-    ctx: RunContext, site: Site, triage: TriageResult, *, mobile: bool, first_index: int
+    ctx: RunContext,
+    site: Site,
+    triage: TriageResult,
+    *,
+    mobile: bool,
+    first_index: int,
+    click_interstitial: bool = True,
 ) -> tuple[Capture, bool]:
-    """One browser context: load the URL, snapshot, try the Cloudflare warning click-through.
-    Returns the capture and whether the page looked like an empty SPA shell."""
+    """One browser context: load the URL, snapshot, try the Cloudflare warning click-through
+    (unless `click_interstitial` is off: capture-only runs never click). Returns the capture and
+    whether the page looked like an empty SPA shell."""
     settings = ctx.settings
     site_dir = ctx.site_dir(site)
     notes: list[str] = []
@@ -209,7 +216,7 @@ async def _open_and_snapshot(
         button = page.get_by_role("button", name=INTERSTITIAL_BUTTON).or_(
             page.get_by_role("link", name=INTERSTITIAL_BUTTON)
         )
-        if await button.count():
+        if click_interstitial and await button.count():
             notes.append("clicked through a browser/CDN warning page")
             await button.first.click(timeout=10000)
             index += 1
@@ -260,13 +267,22 @@ async def _highlight_new_addresses(
     path.write_text(json.dumps(highlights, indent=2))
 
 
-async def capture_site(ctx: RunContext, site: Site, triage: TriageResult) -> Capture:
+async def capture_site(
+    ctx: RunContext, site: Site, triage: TriageResult, *, click_interstitial: bool = True
+) -> Capture:
     mobile = _is_mobile(ctx.settings, site.url)
-    capture, empty_shell = await _open_and_snapshot(ctx, site, triage, mobile=mobile, first_index=1)
+    capture, empty_shell = await _open_and_snapshot(
+        ctx, site, triage, mobile=mobile, first_index=1, click_interstitial=click_interstitial
+    )
     if capture.loaded and empty_shell and not mobile:
         # Empty desktop render: many scam SPAs only render for phones (A8).
         retry, _ = await _open_and_snapshot(
-            ctx, site, triage, mobile=True, first_index=len(capture.snapshots) + 1
+            ctx,
+            site,
+            triage,
+            mobile=True,
+            first_index=len(capture.snapshots) + 1,
+            click_interstitial=click_interstitial,
         )
         capture.snapshots += retry.snapshots
         capture.notes += ["empty desktop render; retried with mobile viewport", *retry.notes]
@@ -634,7 +650,7 @@ async def run_pipeline(
     semaphore = asyncio.Semaphore(settings.run.concurrency)
     async with async_playwright() as pw:
         browser = await launch_browser(pw, proxy)
-        ctx = RunContext(settings, run_dir, llm, proxy=proxy, browser=browser)
+        ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm, proxy=proxy, browser=browser)
 
         async def one(site: Site) -> SiteResult:
             started = datetime.now(UTC)
@@ -677,11 +693,65 @@ async def run_pipeline(
     return [results[s.site_id] for s in sites if s.site_id in results]
 
 
+async def run_capture_only(
+    settings: Settings, sites: list[Site], run_dir: Path
+) -> list[dict[str, object]]:
+    """Evidence only: for each site triage called live, load the landing page (desktop, plus the
+    mobile retry for an empty shell) and save snapshot, HTML, text and network log. No clicks, no
+    navigation agent, no model calls, no Wayback, no verdicts. Needs triage.jsonl in the run dir."""
+    proxy = require_egress_proxy()
+    triage = load_triage(run_dir / "triage.jsonl")
+    todo = [s for s in sites if s.site_id in triage and triage[s.site_id].status == SiteStatus.LIVE]
+    print(f"{len(todo)} live sites to capture (landing only, no clicks, no model calls)")
+    semaphore = asyncio.Semaphore(settings.run.concurrency)
+    rows: list[dict[str, object]] = []
+    async with async_playwright() as pw:
+        browser = await launch_browser(pw, proxy)
+        # The context needs an LLM client by type; nothing here ever calls it.
+        llm = LLMClient(settings.llm.gateway_url)
+        ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm, proxy=proxy, browser=browser)
+
+        async def one(site: Site) -> None:
+            started = datetime.now(UTC)
+            site_dir = ctx.site_dir(site)
+            if site_dir.exists():
+                shutil.rmtree(site_dir)
+            site_dir.mkdir(parents=True)
+            row: dict[str, object] = {"site_id": site.site_id, "url": site.url}
+            async with semaphore:
+                try:
+                    cap = await asyncio.wait_for(
+                        capture_site(ctx, site, triage[site.site_id], click_interstitial=False),
+                        timeout=settings.run.site_timeout_s,
+                    )
+                    (site_dir / "capture.json").write_text(
+                        json.dumps({"notes": cap.notes, "partial": cap.partial})
+                    )
+                    row |= {
+                        "loaded": cap.loaded,
+                        "snapshots": len(cap.snapshots),
+                        "notes": cap.notes,
+                    }
+                except TimeoutError:
+                    row["error"] = "site timeout"
+                except Exception as exc:  # noqa: BLE001 - one site never crashes the run
+                    row["error"] = f"{type(exc).__name__}: {exc}"
+            row["seconds"] = round((datetime.now(UTC) - started).total_seconds(), 1)
+            rows.append(row)
+            print(f"  {site.site_id} {row}", flush=True)
+
+        await asyncio.gather(*(one(s) for s in todo))
+        await browser.close()
+    await ctx.llm.aclose()
+    (run_dir / "capture.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return rows
+
+
 async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[SiteResult]:
     """Re-run extraction + classification from saved evidence. No site is visited."""
     checkpoint = load_checkpoint(run_dir / "checkpoint.jsonl")
     llm = LLMClient(settings.llm.gateway_url)
-    ctx = RunContext(settings, run_dir, llm)
+    ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm)
     results = []
     for site in sites:
         old = checkpoint.get(site.site_id)

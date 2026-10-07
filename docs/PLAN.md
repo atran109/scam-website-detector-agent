@@ -102,7 +102,7 @@ Adjust the hours to the real schedule.
 - [x] Local mock exchange fixture (register → login → deposit → coin/network selector) with failure variants and traps (step A done 2026-10-05). **Mock mode (decided 2026-10-05):** runs inside the crawler container (no route out); the browser runs without the proxy only under an explicit `--mock` flag that refuses every non-loopback URL; `make selftest` checks that refusal
 - [x] `elements.py`: accessibility roles **plus** non-semantic clickables (`cursor: pointer`, click handlers) (step B, 2026-10-05)
 - [x] Tool whitelist incl. `click_at` fallback; policy checks (same-domain, placeholders only, no payments/signing) (step C, 2026-10-05)
-- [~] Synthetic identity + disposable mailbox (`check_email`): identity and mail.tm client built (step C); `check_email` wired into the loop and exercised against the mock inbox (step D, 2026-10-06); mail.tm not yet exercised against the live API
+- [~] Synthetic identity + disposable mailbox (`check_email`): identity and mail.tm client built (step C); `check_email` wired into the loop and exercised against the mock inbox (step D, 2026-10-06); mail.tm create+poll verified live through the proxy 2026-10-06 (LOG 21:55); reading a delivered message verified too (LOG 22:50)
 - [x] Iterate every coin and network on the deposit page; extract after every step (loop.py, step D 2026-10-06; proven on the mock by a scripted decider)
 - [x] Stop conditions and `blocked_at` (invite code, SMS, CAPTCHA, KYC, geo-block, `email_verification`) (step D)
 - [x] Give-up rule: stop a site after 4 consecutive failed steps (`max_consecutive_failures`) (step D)

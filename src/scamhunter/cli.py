@@ -14,6 +14,7 @@ from scamhunter.pipeline import (
     load_checkpoint,
     load_sites,
     rescore,
+    run_capture_only,
     run_pipeline,
     run_triage,
     status_counts,
@@ -69,6 +70,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         shutil.copyfile(RUNS_DIR / args.triage_from / "triage.jsonl", out / "triage.jsonl")
     results = asyncio.run(run_pipeline(settings, sites, out, resume=args.resume))
     _finalize(results, settings, run_id)
+    return 0
+
+
+def cmd_capture(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    sites = _select(load_sites(URLS_PATH), args.only)
+    out = run_dir(args.run_id or new_run_id())
+    if not (out / "triage.jsonl").exists():
+        shutil.copyfile(RUNS_DIR / args.triage_from / "triage.jsonl", out / "triage.jsonl")
+    rows = asyncio.run(run_capture_only(settings, sites, out))
+    errors = [r for r in rows if "error" in r]
+    print(f"\n{len(rows)} captured, {len(errors)} errors → {out}/capture.jsonl")
     return 0
 
 
@@ -179,6 +192,15 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--triage-from", help="reuse triage.jsonl from another run id")
     run.add_argument("--no-agent", action="store_true", help="skip navigation (M3)")
 
+    capture = sub.add_parser(
+        "capture", help="landing capture of live sites only (no agent/clicks/LLM)"
+    )
+    capture.add_argument("--run-id", help="run directory name (default: timestamp)")
+    capture.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
+    capture.add_argument(
+        "--triage-from", default="triage-1", help="run id whose triage.jsonl to use"
+    )
+
     for name, help_text in (
         ("rescore", "re-classify a run from saved evidence (no visits)"),
         ("report", "publish a run's results into output/"),
@@ -201,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "triage": cmd_triage,
         "run": cmd_run,
+        "capture": cmd_capture,
         "rescore": cmd_rescore,
         "report": cmd_report,
         "review": cmd_review,

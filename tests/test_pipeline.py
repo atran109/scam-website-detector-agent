@@ -78,7 +78,7 @@ def test_rendered_parking_page_takes_dead_site_path(tmp_path: Path) -> None:
         registrable_domain="adnins.cloud",
     )
     triage = TriageResult(status=SiteStatus.LIVE, elapsed_ms=1, reason="SPA shell")
-    ctx = RunContext(load_settings(), tmp_path, llm=None)  # type: ignore[arg-type]
+    ctx = RunContext(settings=load_settings(), run_dir=tmp_path, llm=None)  # type: ignore[arg-type]
 
     analysis = asyncio.run(analyze(ctx, site, triage, [snapshot]))
 

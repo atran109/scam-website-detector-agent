@@ -647,3 +647,68 @@ Method (`eval/live_tally.py`, visible text of the first, landing snapshot of `ru
 
 ## 2026-10-06 21:12 · H+? · RESULT [arch]: step E work pushed
 - `origin/main` is at `d9c9692` (the first push of M3: 9 commits from `fd5954c`). Before pushing, the anonymous GitHub API returned 404 for the repo (private; it was public on 2026-10-05) and a scan of tracked files found no `sk-ant-` keys, no `.env` and nothing under `runs/`. Whether `@rraina` has access was not checked.
+
+## 2026-10-06 21:40 · H+? · DECISION [arch] (user): mock wallet deferred until the full live-site tally; extra invite_required runs folded into the next mock regression
+- Supersedes the open question of the 21:06 entry on whether the mock wallet is built before the pilot: it waits for the tally on all live sites (`eval/live_tally.py` on full data, which needs a capture pass first).
+- The extra invite_required runs (to see whether the cycle warning fires, about $0.40 for 3) are not run separately; they ride along with the next mock regression, so the trace field `cycle_warning_steps` gets filled then.
+- Why: no spend or visits for a question the tally may make moot; the regression is needed anyway after the next agent change.
+
+## 2026-10-06 21:55 · H+? · RESULT [limit]: step F, mail.tm smoke test through the proxy (create and poll verified; message read NOT verified)
+Full selftest first: 41/41 (run `2026-10-06T21-09-54`). Then `docker/mailtm_smoke.py` ran inside the crawler container (`EGRESS_PROXY` only), run dir `runs/mailtm-smoke`.
+- **Create:** `GET /domains`, `POST /accounts`, `POST /token` all succeeded in 0.99 s total. The proxy needed no allowlist change. Address `7b78b58565ac@maxxspace.com` (domain chosen by mail.tm).
+- **Poll:** 28 polls over 154 s at 5 s spacing, 0 failures, no 429s. `GET /messages` took 0.13 s (first) then 0.42–0.48 s. The egress log shows 28 `api.mail.tm` requests, all `TCP_TUNNEL/200`.
+- **Not verified: receiving and reading a message.** mail.tm cannot send mail, so a sender was needed. I tried a direct SMTP send from the host to the inbox's MX; the permission classifier denied it, so no message was ever sent and `next_message()` has not returned a real message, delivery latency is unmeasured, and the `text`/`intro` body fields are unconfirmed against the live API. Not retried by another route.
+- **Failure modes seen:** none. Not tested: 429 rate limiting under load, token expiry, domain rotation, and mail that arrives after the 150 s window.
+- Options to finish the read: (a) the user sends one mail from their own account to the inbox of a fresh run; (b) the user allows the host SMTP send; (c) leave the read to the pilot, where a real site's verification mail is the test (risk: a mail-parsing bug then costs a site).
+
+## 2026-10-06 22:00 · H+? · DECISION [arch] (user): capture-only pass over the live sites; new `scamhunter capture` / `make capture`
+- User approved the proposal of the 21:55 turn: landing snapshot and saved HTML only. `run_capture_only` (pipeline.py) takes `triage.jsonl` (default `triage-1`, copied into the run dir), keeps sites triage called `live` (56), and runs `capture_site` with the Cloudflare warning click-through **disabled** (`click_interstitial=False`), so the pass makes no clicks at all. No navigation agent, no model calls (an `LLMClient` is built only because `RunContext` requires one and is never used), no Wayback, no verdicts. Output: `sites/<id>/` evidence in the `run` layout, `capture.jsonl` (loaded, snapshot count, seconds, notes or error per site). `make capture` depends on `selftest`, like `run`.
+- Kept: the mobile-viewport retry for an empty desktop render (a second load, no click), and the address-highlight screenshots (screenshots of the loaded page).
+- Why not `run --no-agent`: that still calls the judge and Wayback and would click the interstitial. Rejected.
+- Limits: triage-1 is from 2026-10-04, so a site that died or changed since is captured as whatever it is now (recorded as loaded=false or an error); per-site timeout is the run's 300 s. No unit test covers the no-click path (it needs a browser page with an interstitial); `make check` passes (518 tests).
+
+## 2026-10-06 22:10 · H+? · PROBLEM [limit]: first capture-1 attempt visited nothing
+- `run_capture_only` built `RunContext` with positional arguments, so `proxy` and `browser` landed in the wrong fields and every site failed at `new_context` (`'NoneType' has no attribute 'new_context'`, 0.0 s each). 56 errors, no site was loaded, no traffic beyond the selftest. Fixed with keyword arguments; no test caught it because the function needs a browser. Rerun as `capture-2`.
+
+## 2026-10-06 22:30 · H+? · RESULT [limit][future]: capture-only pass `capture-2` and the live-site tally on all 56 (supersedes the 13-site tally of 21:06; the mock wallet stays deferred pending the user's call)
+Full selftest 41/41 first. 56 live sites (per triage-1, 2026-10-04) captured: 56 loaded, 0 errors, 0 clicks, no model calls, no Wayback; mobile retry fired for 5 (023, 024, 069, 079, 096). About 5 minutes wall time (selftest end to capture end), under the 5–10 minute estimate; cost $0.
+`eval/live_tally.py runs/capture-2` (same mechanical method as before):
+| bucket | n of 56 |
+|---|---|
+| registration-gated (login/register wording or account menu) | 27 |
+| unclear | 23 |
+| address on landing (5 of them only low-confidence) | 5 |
+| wallet-gated | 1 (055) |
+- **Wallet-gated is 1 of 56 (2%)**, the same site as before. Data for the mock-wallet decision: on this tally it does not look like "several". The tally cannot see modals that appear after load, and many of the unclear pages are near-empty.
+- **Unclear is large (23):** 5 pages have 0–1 words even after the mobile retry (023, 024, 069, 079, 096), 9 have 12–19 words (004, 029, 036, 044, 054, 067, 139, 017, 003-ish, likely parked/placeholder or JS shell), the rest have 70–843 words with no auth wording. These need a look at the screenshots before anyone calls them gated or not.
+- **Address on landing:** 027 (primary EVM), 099 and 100 (primary EVM + TRON, identical pair), 031 and 078 (low-confidence only, token contracts such as WETH-like addresses, not deposit wallets). So 3 real, 2 doubtful.
+- Registration-gated is the dominant case, 27 of 56 (48%); 11 of those share the same Chinese-language shop template (128–130, 141–142, 150–152, 125, 118 and similar), so it is fewer independent designs than the count suggests.
+- Caveats: triage-1 is two days old; the sample is all live sites, not a random sample of scams; the bucketing is words on a landing page, not a judged deposit flow.
+
+## 2026-10-06 22:35 · H+? · FINDING [limit]: corrections to the 22:30 tally entry (from the tally output)
+- The shared Chinese-language shop template is 9 sites, not "11": 125, 128, 129, 130, 141, 142, 150, 151, 152 (all "登入 註冊" with a shop name; 118 is a different login page). Grouping is by visible wording only, not verified as one operator.
+- Unclear sites by size, exactly: 0–1 words: 023, 024, 069, 079, 096 (5); 12–19 words: 004, 017 (39 words, so not this group), 029, 036, 044, 054, 067, 139 (so 004, 029, 036, 044, 054, 067, 139 are the 12–19-word group, 7 sites); 39–843 words: 003, 017, 051, 053, 071, 073, 081, 091, 102, 117, 145 (11). Total 5 + 7 + 11 = 23. The "003-ish" guess was wrong: 003 has 70 words. That these small pages are parked or JS shells is a guess until the screenshots are looked at.
+- "Doubtful" addresses 031 and 078: the tally marks them low-confidence; that they are token contracts (WETH-like) is my reading of the 0xc02aaa39b2… and So1111111… prefixes, not checked.
+
+## 2026-10-06 22:50 · H+? · DECISION [future][limit] (user): the mock wallet is out of v1
+- Supersedes the 22:30 "deferred pending the user's call" and every earlier "deferred, not cut" entry. Why: only 1 of 56 live sites (2%) is wallet-gated on the landing-page tally (055). Such sites end `blocked_at: wallet_required`, which the output already supports. README "With more time" carries it, with the caveat that the tally cannot see modals that appear after load. Rejected: building it for the pilot (cost and a new attack surface in `window.ethereum` for 1 site).
+
+## 2026-10-06 22:50 · H+? · DECISION [creative][future] (user): the 9-site shared shop template goes in the README
+- Sites 125, 128–130, 141–142, 150–152 share one Chinese-language shop template (by visible wording, operator not verified). README: "With more time" (cluster by template/HTML structure; operator-level leads for TRM) and "Creative" gets the capture-only mode. Why: it is a finding about the data that a reviewer would otherwise miss, and it shows the 27 registration-gated count is fewer independent designs.
+
+## 2026-10-06 22:50 · H+? · DECISION [arch] + RESULT: `RunContext` keyword-only; browser test that capture-only never clicks
+- `@dataclass(kw_only=True)`: the positional-argument bug of 22:10 cannot recur. Call sites and one unit test updated.
+- `tests/browser/test_capture_no_click.py`: a loopback fake "Suspected phishing" page counts clicks on "Ignore & Proceed". Normal capture clicks once (positive control), `click_interstitial=False` leaves 0. `make test-browser`: 31 passed (5 min 34 s), `make check`: 518 passed.
+
+## 2026-10-06 22:50 · H+? · FINDING [limit]: 031 and 078 are token pages; why they passed the blocklist, and a real tiering bug in 031
+- **The blocklist is 8 entries** (USDT/USDC on ERC-20 and TRC-20, zero and burn addresses, two example BTC addresses), so WETH, WBNB, BSC-USDT, wrapped SOL and the like are not on it. It is not meant to be a token registry; the other contract defence is the "contract" label or key (extractor, pass 1).
+- **078 pugmeme.io (memecoin, Cloudflare Turnstile gate):** 40 addresses, all low-confidence (38 from bundled script, e.g. WETH 0xC02aaA…, WBNB 0xbb4CdB…, BSC-USDT 0x55d398…, wrapped SOL So1111…, USDC EPjFW…; the project's own Solana mint EkPUW…pump). 6 more were skipped as labelled contracts. Yes, token contracts; they stay low-confidence, never primary, which is the designed outcome, but they are noise in `low_confidence_addresses`.
+- **031 drops-marketplace.netlify.app/eth (token-launch marketplace):** 280 addresses, **134 PRIMARY**, all from one API response whose address keys are `seller`, `lpAddress`, `referral` (155 each). They are third-party launchpad data: liquidity-pool contracts and seller and referral wallets, not this site's deposit addresses. They go PRIMARY because `PAYMENT_KEY` (`extractor.py:50`) matches `addr|address` inside `lpAddress` (and an ETH label of confidence 0.9 or more). That is a precision bug in the extractor: a generic "address" key counts as payment context. Not fixed here (the user asked a question, not a change); proposal: drop bare `addr|address`, keep `deposit|recharge|receiv|collect|approv|spender|wallet|pay` and exact `address` only at the object root, then add a test on this fixture. If it stays, 031 reports 134 junk primary addresses and would hurt precision.
+- Also: the tally counted 031 as `address_on_landing` because of this bug; it is probably a non-deposit site, so "5 address on landing" is really 3 or 4.
+
+## 2026-10-06 22:50 · H+? · RESULT [limit]: mail.tm end to end (completes step F; supersedes the "NOT verified" part of 21:55)
+- Fresh inbox `522df5368c21@maxxspace.com` (create 1.07 s), polled every 5 s through the proxy. The user sent one plain-text message ("test", subject "test"); poll #69 at 377 s returned it, list plus fetch 0.64 s. `describe_message` wrapped it as an untrusted block; the body came from the `text` field as expected. 68 earlier polls were empty, 0 failures.
+- Not measured: delivery latency (the send time is unknown to the script, so only "arrived before poll #69" is known), mail with a code or link, HTML-only mail, rate limits, token expiry.
+
+## 2026-10-06 22:50 · H+? · RESULT: contact sheet of the 23 unclear sites
+- `eval/contact_sheet.py` builds `runs/capture-2/contact_sheet/index.html` (screenshots, ID, word count and chars, title, final URL of the last snapshot; CSP, no script, everything escaped). The 5 empty pages (069, 079, 096, 023, 024) come first. Word counts use whitespace splitting as the tally does, so CJK pages read low: 023 is "網站維護中" (site under maintenance), 5 characters and "1 word".

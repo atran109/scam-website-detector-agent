@@ -102,9 +102,9 @@ class MailTmMailbox:
     memory: never logged, never written to disk, and hidden from repr. Pass an `httpx.AsyncClient`
     that goes through the egress proxy.
 
-    NOT yet exercised against the live API (the sandbox has no route to it); the request and
-    response shapes follow mail.tm's public documentation and are covered by a mocked transport.
-    The first real use is the pilot."""
+    Exercised live through the egress proxy on 2026-10-06 (create, poll, read one plain-text
+    message; LOG 2026-10-06); also covered by a mocked transport. Untested live: rate limits,
+    token expiry and verification mail from a real site."""
 
     def __init__(self, client: httpx.AsyncClient, base_url: str = "https://api.mail.tm") -> None:
         self._client = client

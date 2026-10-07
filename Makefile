@@ -9,7 +9,7 @@ RUN_ID ?= $(shell date +%Y-%m-%dT%H-%M-%S)
 ROUTER_IP ?= $(shell route -n get default 2>/dev/null | awk '/gateway:/{print $$2}')
 COMPOSE := RUN_ID=$(RUN_ID) SELFTEST_ROUTER_IP=$(ROUTER_IP) docker compose
 
-.PHONY: agent-mock review build selftest triage run rescore eval report test test-browser lint check venv down
+.PHONY: agent-mock review build selftest triage run capture rescore eval report test test-browser lint check venv down
 
 $(BIN)/python: pyproject.toml
 	$(PYTHON) -m venv $(VENV)
@@ -49,6 +49,10 @@ down:
 
 run: selftest
 	$(COMPOSE) run --rm crawler scamhunter run --run-id $(RUN_ID) $(ARGS)
+
+# Evidence only (LOG 2026-10-06 22:00): landing capture of live sites, no clicks, no agent, no LLM.
+capture: selftest
+	$(COMPOSE) run --rm crawler scamhunter capture --run-id $(RUN_ID) $(ARGS)
 
 # M3 step E: Claude (via the gateway) drives the local mock exchange. Mock mode: the browser
 # reaches loopback only. Gated on selftest, which proves that. Spend cap: --spend-cap (USD).
