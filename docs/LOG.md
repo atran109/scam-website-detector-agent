@@ -644,3 +644,6 @@ Method (`eval/live_tally.py`, visible text of the first, landing snapshot of `ru
 | unclear | 4 | 003, 051, 004 (parked), 067 (fake shop) | no auth wording, no address (immigration consultancy, 3D-print shop, ParkLogic page, antique shop) |
 - Among the 9 sites the judge called scam: 2 address on landing, 5 registration-gated (one is a fake shop, so "gated" there means a login link, not a deposit flow), 1 wallet-gated, 1 unclear (fake shop). **Wallet-gated: 1 of 13 live, 1 of 9 scam**: "several" is not shown by this sample, but it is too small to rule the mock wallet out.
 - Caveats: the bucketing is mechanical (words in visible text), not a judgment that a deposit flow exists; the landing snapshot misses modals that appear later; the pilot ran on desktop with at most one mobile retry. To cover the other 43 live sites, capture needs a landing snapshot (one visit per site, inside the sandbox, after selftest), which the full run's capture stage already does.
+
+## 2026-10-06 21:12 · H+? · RESULT [arch]: step E work pushed
+- `origin/main` is at `d9c9692` (the first push of M3: 9 commits from `fd5954c`). Before pushing, the anonymous GitHub API returned 404 for the repo (private; it was public on 2026-10-05) and a scan of tracked files found no `sk-ant-` keys, no `.env` and nothing under `runs/`. Whether `@rraina` has access was not checked.
