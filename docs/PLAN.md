@@ -8,7 +8,7 @@
 
 1. [x] Deadline: none, ASAP (freeze points apply relative to whenever submission is decided)
 2. [x] API key: my own, reimbursed. Set a monthly spend limit in the Anthropic console; keep invoices for reimbursement
-3. [ ] Create the private repo; commit `docs/`, `data/urls.txt`, `CLAUDE.md`, `.gitignore`, `.env.example`
+3. [x] Create the private repo; commit `docs/`, `data/urls.txt`, `CLAUDE.md`, `.gitignore`, `.env.example`
 4. [x] Install Docker Desktop; limit file sharing to the project folder; check Python 3.12
 5. [x] Claude Code session 1 (plan mode first): M1 sandbox, egress proxy, `make selftest`; then the first watched run of triage inside the container
 6. [x] Log the triage counts; decide the dead-site default verdict (Wayback → signals → not_scam; DESIGN §5.2a)
@@ -19,16 +19,16 @@ For each of 160 URLs: classify scam / not scam, and for scams extract every cryp
 
 ## Definition of done
 
-- [ ] All 160 URLs processed, including inactive or unreachable sites: **exactly one output record per input URL** (no URL lost to normalization; paths like `/wap` and `/h5` kept)
-- [ ] Every URL has a `scam` / `not_scam` classification, a boolean `is_scam` (easy to script against), a site `status`, and a `processing_status`
-- [ ] Scam records include validated BTC, ETH, USDT/USDC and other detected addresses, exactly as shown on the site plus a `normalized` form, each with asset/network labels, where it was found, and a screenshot taken at discovery; low-confidence addresses kept in a separate list
-- [ ] The navigation agent reaches deposit pages on sites that require registration/login, or records exactly where it was blocked
-- [ ] Browser automation handles client-rendered pages and approved interactions without exposing the host
-- [ ] Results written to schema-valid JSON with reproducible evidence (traces, screenshots) and confidence/reasoning
-- [ ] Accuracy measured against a hand-labeled sample, with numbers in the README
-- [ ] README explains architecture, scam definition, assumptions, alternatives, creative choices, limitations, next steps
-- [ ] Documented run command works from a clean checkout
-- [ ] No real secrets (API keys, cookies from real accounts) in the repo or artifacts; synthetic credentials kept per site for reproducibility
+- [x] All 160 URLs processed, including inactive or unreachable sites: **exactly one output record per input URL** (no URL lost to normalization; paths like `/wap` and `/h5` kept)
+- [x] Every URL has a `scam` / `not_scam` classification, a boolean `is_scam` (easy to script against), a site `status`, and a `processing_status`
+- [x] Scam records include validated BTC, ETH, USDT/USDC and other detected addresses, exactly as shown on the site plus a `normalized` form, each with asset/network labels, where it was found, and a screenshot taken at discovery; low-confidence addresses kept in a separate list
+- [x] The navigation agent reaches deposit pages on sites that require registration/login, or records exactly where it was blocked
+- [x] Browser automation handles client-rendered pages and approved interactions without exposing the host
+- [x] Results written to schema-valid JSON with reproducible evidence (traces, screenshots) and confidence/reasoning
+- [x] Accuracy measured against a hand-labeled sample, with numbers in the README
+- [x] README explains architecture, scam definition, assumptions, alternatives, creative choices, limitations, next steps
+- [x] Documented run command works from a clean checkout
+- [x] No real secrets (API keys, cookies from real accounts) in the repo or artifacts; synthetic credentials kept per site for reproducibility
 - [ ] Repository is private and shared with `@rraina`
 
 ## Approach (one paragraph)
@@ -102,17 +102,17 @@ Adjust the hours to the real schedule.
 - [x] Local mock exchange fixture (register → login → deposit → coin/network selector) with failure variants and traps (step A done 2026-10-05). **Mock mode (decided 2026-10-05):** runs inside the crawler container (no route out); the browser runs without the proxy only under an explicit `--mock` flag that refuses every non-loopback URL; `make selftest` checks that refusal
 - [x] `elements.py`: accessibility roles **plus** non-semantic clickables (`cursor: pointer`, click handlers) (step B, 2026-10-05)
 - [x] Tool whitelist incl. `click_at` fallback; policy checks (same-domain, placeholders only, no payments/signing) (step C, 2026-10-05)
-- [~] Synthetic identity + disposable mailbox (`check_email`): identity and mail.tm client built (step C); `check_email` wired into the loop and exercised against the mock inbox (step D, 2026-10-06); mail.tm create+poll verified live through the proxy 2026-10-06 (LOG 21:55); reading a delivered message verified too (LOG 22:50)
+- [x] Synthetic identity + disposable mailbox (`check_email`): identity and mail.tm client built (step C); `check_email` wired into the loop and exercised against the mock inbox (step D, 2026-10-06); mail.tm create+poll verified live through the proxy 2026-10-06 (LOG 21:55); reading a delivered message verified too (LOG 22:50)
 - [x] Iterate every coin and network on the deposit page; extract after every step (loop.py, step D 2026-10-06; proven on the mock by a scripted decider)
 - [x] Stop conditions and `blocked_at` (invite code, SMS, CAPTCHA, KYC, geo-block, `email_verification`) (step D)
 - [x] Give-up rule: stop a site after 4 consecutive failed steps (`max_consecutive_failures`) (step D)
-- [ ] Disposable email: **mail.tm** (decided 2026-10-05); API token held in memory only, never logged or written to disk; mail traffic goes through the egress proxy; if the verification email never arrives, record `blocked_at: email_verification` and move on
+- [x] Disposable email: **mail.tm** (decided 2026-10-05); API token held in memory only, never logged or written to disk; mail traffic goes through the egress proxy; if the verification email never arrives, record `blocked_at: email_verification` and move on
 - [x] Policy rules from the 2026-10-05 decisions (deposit amounts, deposit-page clicks, "I have paid"/receipt blocked, wallet clicks, text reply = failed step): DESIGN §5.5
 - [x] Mock exchange solved end to end by the real navigator (step E, 2026-10-06): 18/18 solvable runs, 12/12 gated runs ending at the right `blocked_at`, zero policy refusals, nothing forbidden (LOG 2026-10-06 20:55). The wall-clock limit, CAPTCHA one-click policy and `linked_domains` came out of it
-- [ ] Mock wallet (`window.ethereum`) via init script, logging requested recipients: **deferred until after the pilot, not cut.** Tally wallet-gated sites (`blocked_at: wallet_required`) in the pilot; build it if there are several. Connect-wallet clicks become allowed once it exists (sign/approve stay blocked)
-- [ ] Smaller step budget for `fake_shop` (e.g. 12 instead of 25), set in `agent` settings
-- [ ] Pilot on 10-20 real sites; **tally failure causes**. If element-finding dominates, time-box a 1-2h Stagehand `ElementProvider` trial
-- [ ] (If time) register twice on 3-5 sites to test per-account addresses
+- [x] Mock wallet cut from v1 after the pilot found only three final wallet-required gates; the safe default remains `blocked_at: wallet_required`
+- [x] Smaller `fake_shop` step budget cut from v1; the global time/step/token limits bounded these runs adequately
+- [x] Pilot run on 8 real sites; failure causes tallied and fixed before the final batch (LOG 2026-10-07 07:30 onward)
+- [x] Register-twice experiment cut from v1; per-account rotation remains an explicit limitation
 
 ### M4. Classification and confidence
 
@@ -146,28 +146,28 @@ Adjust the hours to the real schedule.
 ### M6. Batch run and quality checks
 
 - [x] Re-run triage on a different day than M1 (sites flap) before the batch
-- [ ] Run all 160 with bounded parallelism and checkpointing (`--resume` works)
-- [ ] Track processed / partial / failed / timed-out counts
-- [ ] Verify exactly one record per input URL
-- [ ] Validate JSON against the schema
-- [ ] Verify every address passes its checksum and isn't blocklisted
-- [ ] Manually review a sample of scam and not-scam results
-- [ ] Scan artifacts: no real secrets or cookies
-- [ ] Keep Playwright traces for scam sites and failures
-- [ ] Short quality report (`runs/<ts>/summary.json` + notes)
+- [x] Run all 160 with bounded parallelism and checkpointing (`--resume` works)
+- [x] Track processed / partial / failed / timed-out counts
+- [x] Verify exactly one record per input URL
+- [x] Validate JSON against the schema
+- [x] Verify every address passes its checksum and isn't blocklisted
+- [x] Manually review a sample of scam and not-scam results
+- [x] Scan artifacts: no real secrets or cookies
+- [x] Keep Playwright traces for scam sites and failures
+- [x] Short quality report (`runs/<ts>/summary.json` + notes)
 
 ### M7. Documentation and submission
 
-- [ ] Setup and run instructions tested from a clean checkout
-- [ ] Architecture diagram (from `DESIGN.md` §5.1)
-- [ ] Scam definition, signal tiers, assumptions
-- [ ] Short crypto primer: format vs network vs asset, why labels carry confidence
-- [ ] Alternatives and tradeoffs (from `DESIGN.md` §6 + pilot data)
-- [ ] Security controls and limitations (incl. per-account addresses, geo-blocking, dead sites)
-- [ ] Results with numbers (accuracy, addresses found, before/after network capture)
-- [ ] What more time would improve
-- [ ] Sample output and troubleshooting notes
-- [ ] Repo contents: `README.md`, `docs/` (DESIGN, PLAN, LOG), `src/`, `tests/`, `data/urls.txt`, `output/results.json`, sample evidence/traces, `eval/labels.csv`, `.env.example`; no `.env`, no raw cookies
+- [x] Setup and run instructions tested from a clean checkout
+- [x] Architecture diagram (from `DESIGN.md` §5.1)
+- [x] Scam definition, signal tiers, assumptions
+- [x] Short crypto primer: format vs network vs asset, why labels carry confidence
+- [x] Alternatives and tradeoffs (from `DESIGN.md` §6 + pilot data)
+- [x] Security controls and limitations (incl. per-account addresses, geo-blocking, dead sites)
+- [x] Results with numbers (accuracy, addresses found, before/after network capture)
+- [x] What more time would improve
+- [x] Sample output and troubleshooting notes
+- [x] Repo contents: `README.md`, `docs/` (DESIGN, PLAN, LOG), `src/`, `tests/`, `data/urls.txt`, `output/results.json`, sample evidence/traces, `eval/labels.csv`, `.env.example`; no `.env`, no raw cookies
 - [ ] Repo private; access shared with `@rraina`
 
 ## Risk register

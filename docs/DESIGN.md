@@ -223,6 +223,8 @@ make run ARGS="--resume runs/2026-10-04T10-00"
 make rescore RUN=runs/2026-10-04T10-00       # re-classify from saved evidence; no site visits
 make eval                                    # compare against eval/labels.csv
 make report RUN=runs/2026-10-04T10-00        # publish a run's results into output/ (runs write to runs/<id>/output/)
+# Optional: add richer address evidence from another saved run without changing classifications:
+make report RUN=runs/final ARGS="--supplement-run pilot-id"
 make test                                    # offline tests incl. mock exchange
 ```
 

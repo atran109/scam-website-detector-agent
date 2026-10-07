@@ -24,7 +24,7 @@ from scamhunter.pipeline import (
 )
 from scamhunter.report.review import write_review
 from scamhunter.report.summary import summarize
-from scamhunter.report.writer import write_results
+from scamhunter.report.writer import supplement_address_evidence, write_results
 from scamhunter.store import RUNS_DIR, new_run_id, run_dir
 
 URLS_PATH = REPO_ROOT / "data" / "urls.txt"
@@ -219,7 +219,17 @@ def cmd_report(args: argparse.Namespace) -> int:
     if OUTPUT_DIR.exists():
         shutil.rmtree(OUTPUT_DIR / "screenshots", ignore_errors=True)
     shutil.copytree(src / "output", OUTPUT_DIR, dirs_exist_ok=True)
+    supplemented = supplement_address_evidence(
+        OUTPUT_DIR / "results.json",
+        [(run_id, RUNS_DIR / run_id / "output") for run_id in args.supplement_run],
+        OUTPUT_DIR,
+    )
     print(f"published {src / 'output'} → {OUTPUT_DIR}")
+    if supplemented:
+        print(
+            f"supplemented address evidence for {len(supplemented)} URL(s) from saved run(s): "
+            + ", ".join(supplemented)
+        )
     return 0
 
 
@@ -389,12 +399,18 @@ def main(argv: list[str] | None = None) -> int:
     classify.add_argument("--run-id", required=True)
     classify.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
 
-    for name, help_text in (
-        ("rescore", "re-classify a run from saved evidence (no visits)"),
-        ("report", "publish a run's results into output/"),
-    ):
-        p = sub.add_parser(name, help=help_text)
-        p.add_argument("--run-id", required=True)
+    rescore_parser = sub.add_parser(
+        "rescore", help="re-classify a run from saved evidence (no visits)"
+    )
+    rescore_parser.add_argument("--run-id", required=True)
+    report = sub.add_parser("report", help="publish a run's results into output/")
+    report.add_argument("--run-id", required=True)
+    report.add_argument(
+        "--supplement-run",
+        action="append",
+        default=[],
+        help="saved run id whose richer address evidence may supplement the report (repeatable)",
+    )
     mock = sub.add_parser("agent-mock", help="navigator vs the local mock exchange (M3 step E)")
     mock.add_argument("--run-id", help="run directory name (default: timestamp)")
     mock.add_argument("--variants", default="all", help="comma-separated, or 'all'")

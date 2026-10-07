@@ -1095,3 +1095,43 @@ On the 43 effective live sites of `capture-2` (classified from saved evidence, 1
 - Calibration set: all 25 hand labels are live in this run (22 scam, 3 not-scam; deliberately clear cases, so not a population estimate). A moderate/strong signal appears on 14/22 scams and 0/3 legitimate sites. Three weak signals adds 2 more scams and still 0 legitimate sites. The union therefore selects 16/22 labelled scams and 0/3 labelled legitimate sites; individual moderate signals were 14:0 in this small set. `finance_terms_in_domain` alone remains excluded for dead sites (10 scams and 1 legitimate live label).
 - **Rule chosen:** no content leans scam only with at least one moderate/strong indirect signal **or** at least three weak signals. One or two weak signals are insufficient and return `not_scam` at p=0.4, with `evidence_source: signals_only` so the uncertainty stays explicit. Hard warning-page rules remain unchanged. This favors precision where there is no page evidence and reduces the unsupported scam leans from 68 to 22.
 - Rejected: any-positive-signal (47 weak-only calls are not defensible) and three-weak-only (would discard brand impersonation and takedown evidence that is moderate by itself). The labelled sample is selection-biased and has no dead-site ground truth; that limitation stays in the README.
+
+## 2026-10-07 20:20 · H+? · RESULT [limit] (M6/M7): final artifact and quality gate
+- The last transient error (070) was healed by `--resume`: **160/160 completed, 0 partial,
+  0 error**. A cache-only rescore applied the calibrated dead-site rule without revisiting any
+  target: **59 scam / 101 not-scam**, sources 45 live, 5 Wayback, 68 signals-only and 42 none.
+  The rescore now preserves the original record's `cost` and `identity_used`; before this fix a
+  cached rescore misleadingly reset the summary to zero tokens. Preserved accounting is 2,724,575
+  input / 87,888 output tokens. Accepted live/recovery gateway invocations cost about **$4.12**;
+  the last rescore cost $0 (50 cache hits).
+- Published address result: **19 primary site-address findings, 17 unique, on 8 sites**; 12 were
+  found at a deposit page, 4 after authentication and 3 on a landing page. There are 320
+  low-confidence findings (319 unique) on two sites. The final run exposed 2 of 012's 3 addresses;
+  saved pilot `pilot-20261007b` exposed BTC, EVM and TRON. `scamhunter report
+  --supplement-run pilot-20261007b` now reproducibly selects the richer saved address/navigation
+  evidence for the same URL while retaining the final run's classification and recording a note.
+  No target is revisited and JSON is not hand-edited.
+- Report screenshots are keyed by their source sighting rather than the address. This keeps all 339
+  address-detail screenshot pointers while deduplicating pages that contain hundreds of API
+  addresses: published `output/` fell from 285 MB to **6.4 MB**. If the preferred deposit-page
+  sighting lacks an image (network responses on 057/099), the report uses another sighting of that
+  same address for the screenshot while retaining the preferred source/stage metadata.
+- Validation: strict Pydantic schema; exactly the 160 input URLs in input order; 160 unique records;
+  every record completed. All **339** address details pass their format/checksum validator, are not
+  blocklisted, agree with their tier's flat list, and point to an existing screenshot. Evaluation
+  remains TP 21, FP 0, FN 1, TN 3: **100% precision, 95% recall, 98% F1, 96% accuracy** at both
+  0.45 and 0.5. Published address evaluation is **100% precision and recall (3/3)**.
+- Navigation: 39 attempts, 7 reached deposit; stops were 13 blocked, 10 no-progress, 9
+  not-applicable, 5 time-budget and 2 goal-reached. Final traces: 55 records with existing trace
+  references, 90 zip files; every live-evidence scam has one and there are no final failures.
+  Manual review of five content-backed scams and five content-backed non-scams found the evidence
+  consistent with the labels; 003 remains the one labelled false negative.
+- Security/artifact audit: no key/private-key pattern, cookie file, or browser storage-state file.
+  The final egress log has 2,348 allowed web requests to 333 hosts, 457 denied, **0 risky allowed**;
+  denied `www.ziv3hc.vip` and `ws.btcusdtapi.autos` were page-requested infrastructure and stayed
+  blocked. Details are in ignored `runs/m6-final-20261007/quality-notes.md`.
+- README replaced the skeleton with final numbers, architecture, scam definition and signal tiers,
+  crypto primer, setup/run/resume instructions, sample output, safety controls, limitations,
+  alternatives, pilot fixes, troubleshooting and future work. Stale PLAN boxes were closed or
+  explicitly marked cut. `make check`: **650 passed**, 47 browser tests deselected (the last full
+  browser suite was 47/47 in the M5 gate).

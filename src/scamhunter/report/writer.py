@@ -27,16 +27,16 @@ def primary_sighting(address: CryptoAddress) -> Sighting:
     return (deposit or address.sightings)[0]
 
 
-def _copy_screenshot(
-    sighting: Sighting, site_id: str, address: CryptoAddress, run_dir: Path, out_dir: Path
-) -> str | None:
+def _copy_screenshot(sighting: Sighting, site_id: str, run_dir: Path, out_dir: Path) -> str | None:
     if not sighting.screenshot_path:
         return None
     src = run_dir / sighting.screenshot_path
     if not src.exists():
         return None
-    digest = hashlib.sha256(address.normalized.encode()).hexdigest()[:8]
-    name = f"{site_id}_{address.format.value}_{digest}.png"
+    # Hundreds of addresses can come from one captured API/page snapshot. Key the exported
+    # file by its source so every detail still has evidence without duplicating that image.
+    digest = hashlib.sha256(sighting.screenshot_path.encode()).hexdigest()[:12]
+    name = f"{site_id}_{digest}.png"
     (out_dir / "screenshots").mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, out_dir / "screenshots" / name)
     return f"screenshots/{name}"
@@ -47,6 +47,11 @@ def to_record(result: SiteResult, run_dir: Path, out_dir: Path) -> OutputRecord:
     details = []
     for address in result.addresses + result.low_confidence_addresses:
         sighting = primary_sighting(address)
+        screenshot_sighting = (
+            sighting
+            if sighting.screenshot_path
+            else next((seen for seen in address.sightings if seen.screenshot_path), sighting)
+        )
         details.append(
             {
                 "address": address.address,
@@ -57,7 +62,7 @@ def to_record(result: SiteResult, run_dir: Path, out_dir: Path) -> OutputRecord:
                 "source": sighting.source,
                 "stage": sighting.stage,
                 "screenshot": _copy_screenshot(
-                    sighting, result.site.site_id, address, run_dir, out_dir
+                    screenshot_sighting, result.site.site_id, run_dir, out_dir
                 ),
                 "sighting_count": len(address.sightings),
             }
@@ -119,3 +124,49 @@ def write_results(
     path = out_dir / "results.json"
     path.write_text(file.model_dump_json(indent=2))
     return path
+
+
+def supplement_address_evidence(
+    primary_path: Path, supplements: Sequence[tuple[str, Path]], out_dir: Path
+) -> list[str]:
+    """Use a saved run's record when it found more primary addresses for the same URL.
+
+    Classification stays from the primary run; only address evidence and the more complete
+    navigation summary move over. This lets the published report use repeat-run discoveries
+    without revisiting a target or silently hand-editing JSON.
+    """
+    primary = ResultsFile.model_validate_json(primary_path.read_text())
+    records = {record.url: record for record in primary.results}
+    changed: list[str] = []
+    for run_id, supplement_dir in supplements:
+        supplement = ResultsFile.model_validate_json((supplement_dir / "results.json").read_text())
+        for candidate in supplement.results:
+            current = records.get(candidate.url)
+            if current is None or len(candidate.crypto_addresses) <= len(current.crypto_addresses):
+                continue
+            for detail in candidate.address_details:
+                if not detail.screenshot:
+                    continue
+                source = supplement_dir / detail.screenshot
+                if source.exists():
+                    target = out_dir / detail.screenshot
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source, target)
+            records[candidate.url] = current.model_copy(
+                update={
+                    "crypto_addresses": candidate.crypto_addresses,
+                    "low_confidence_addresses": candidate.low_confidence_addresses,
+                    "address_details": candidate.address_details,
+                    "navigation": candidate.navigation,
+                    "notes": [
+                        *current.notes,
+                        f"address evidence supplemented from saved run {run_id}",
+                    ]
+                    if f"address evidence supplemented from saved run {run_id}" not in current.notes
+                    else current.notes,
+                }
+            )
+            changed.append(candidate.url)
+    merged = primary.model_copy(update={"results": [records[r.url] for r in primary.results]})
+    primary_path.write_text(merged.model_dump_json(indent=2))
+    return changed

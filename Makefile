@@ -109,4 +109,4 @@ review: venv
 
 report:
 	@test -n "$(RUN)" || (echo "usage: make report RUN=runs/<id>"; exit 1)
-	$(BIN)/scamhunter report --run-id $(notdir $(RUN))
+	$(BIN)/scamhunter report --run-id $(notdir $(RUN)) $(ARGS)

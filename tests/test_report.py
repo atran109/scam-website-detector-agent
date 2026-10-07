@@ -27,7 +27,12 @@ from scamhunter.models import (
     Verdict,
 )
 from scamhunter.pipeline import apply_sibling_signals
-from scamhunter.report.writer import primary_sighting, to_record, write_results
+from scamhunter.report.writer import (
+    primary_sighting,
+    supplement_address_evidence,
+    to_record,
+    write_results,
+)
 
 SETTINGS = load_settings()
 NOW = datetime.now(UTC)
@@ -86,6 +91,29 @@ def test_primary_sighting_prefers_earliest_deposit_page() -> None:
     assert primary_sighting(address(DiscoveryStage.LANDING)) is not None
 
 
+def test_record_uses_another_address_sighting_when_primary_has_no_screenshot(
+    tmp_path: Path,
+) -> None:
+    evidence = tmp_path / "evidence.png"
+    evidence.write_bytes(b"png")
+    first = sighting(DiscoveryStage.NAVIGATION).model_copy(
+        update={"screenshot_path": "evidence.png"}
+    )
+    primary = sighting(DiscoveryStage.DEPOSIT_PAGE)
+    found = address(DiscoveryStage.NAVIGATION, DiscoveryStage.DEPOSIT_PAGE).model_copy(
+        update={"sightings": [first, primary]}
+    )
+    record = to_record(
+        result("001", "x.test", SiteStatus.LIVE, live_scam(), [found]),
+        tmp_path,
+        tmp_path / "out",
+    )
+
+    assert record.address_details[0].stage == DiscoveryStage.DEPOSIT_PAGE
+    assert record.address_details[0].screenshot
+    assert (tmp_path / "out" / record.address_details[0].screenshot).read_bytes() == b"png"
+
+
 def test_record_and_file_validate(tmp_path: Path) -> None:
     scam = result(
         "001",
@@ -103,6 +131,35 @@ def test_record_and_file_validate(tmp_path: Path) -> None:
     path = write_results([dead, scam], "r", tmp_path, tmp_path / "out", "test")
     parsed = ResultsFile.model_validate_json(path.read_text())
     assert [r.url for r in parsed.results] == ["https://x.test", "https://y.test"]
+
+
+def test_saved_run_can_supplement_richer_address_evidence(tmp_path: Path) -> None:
+    primary_dir = tmp_path / "primary"
+    supplement_dir = tmp_path / "supplement"
+    output_dir = tmp_path / "published"
+    primary = result(
+        "001", "x.test", SiteStatus.LIVE, live_scam(), [address(DiscoveryStage.LANDING)]
+    )
+    second = address(DiscoveryStage.DEPOSIT_PAGE).model_copy(
+        update={
+            "address": "TUEZSdKsoDHQMeZwihtdoBiN46zxhGWYdH",
+            "normalized": "TUEZSdKsoDHQMeZwihtdoBiN46zxhGWYdH",
+        }
+    )
+    richer = primary.model_copy(update={"addresses": [*primary.addresses, second]})
+    primary_path = write_results([primary], "primary", tmp_path, primary_dir, "test")
+    write_results([richer], "pilot", tmp_path, supplement_dir, "test")
+    output_dir.mkdir()
+    published = output_dir / "results.json"
+    published.write_text(primary_path.read_text())
+
+    changed = supplement_address_evidence(published, [("pilot", supplement_dir)], output_dir)
+
+    parsed = ResultsFile.model_validate_json(published.read_text())
+    assert changed == ["https://x.test"]
+    assert parsed.results[0].classification == primary.classification.verdict
+    assert parsed.results[0].crypto_addresses == [TRON, second.address]
+    assert parsed.results[0].notes == ["address evidence supplemented from saved run pilot"]
 
 
 def test_sibling_of_live_scam_leans_scam() -> None:

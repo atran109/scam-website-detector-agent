@@ -1186,6 +1186,15 @@ async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[
             navigation=navigation,
             identity_id=capture_info.get("identity_id"),
         )
+        # Rescoring makes fresh judge calls, but a cache hit legitimately records zero usage.
+        # Preserve the run's accumulated per-site accounting and identity reference rather than
+        # making the published summary look as though the original navigation was free.
+        result = result.model_copy(
+            update={
+                "cost": old.cost,
+                "identity_used": old.identity_used or result.identity_used,
+            }
+        )
         results.append(result)
     await llm.aclose()
     write_jsonl(run_dir / "rescore.jsonl", results)
