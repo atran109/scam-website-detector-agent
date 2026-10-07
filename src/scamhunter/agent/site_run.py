@@ -216,6 +216,12 @@ async def navigate_site(
             opts.blocked[site.site_id] = list(getattr(context, "blocked_urls", []))
         return run, notes, identity.identity_id
     finally:
-        await context.tracing.stop(path=str(site_dir / "trace_nav.zip"))
-        await context.close()
+        try:
+            await context.tracing.stop(path=str(site_dir / "trace_nav.zip"))
+        except PlaywrightError as exc:
+            notes.append(f"browser trace unavailable: {str(exc).splitlines()[0][:160]}")
+        try:
+            await context.close()
+        except PlaywrightError as exc:
+            notes.append(f"browser context close failed: {str(exc).splitlines()[0][:160]}")
         await close_mail()

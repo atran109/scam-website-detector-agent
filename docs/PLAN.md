@@ -145,7 +145,7 @@ Adjust the hours to the real schedule.
 
 ### M6. Batch run and quality checks
 
-- [ ] Re-run triage on a different day than M1 (sites flap) before the batch
+- [x] Re-run triage on a different day than M1 (sites flap) before the batch
 - [ ] Run all 160 with bounded parallelism and checkpointing (`--resume` works)
 - [ ] Track processed / partial / failed / timed-out counts
 - [ ] Verify exactly one record per input URL

@@ -2,13 +2,14 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
 
 from scamhunter.cli import URLS_PATH
 from scamhunter.models import DiscoveryStage, PageSnapshot, SiteStatus
-from scamhunter.pipeline import load_sites, rendered_non_content
+from scamhunter.pipeline import browser_was_lost, load_sites, rendered_non_content
 
 
 def test_real_url_list_loads_all_160_in_order() -> None:
@@ -120,3 +121,11 @@ def test_blank_spa_after_retry_is_stuck_loading(tmp_path: Path) -> None:
 def test_content_page_is_not_non_content(tmp_path: Path) -> None:
     html = "<html><body><p>" + "Deposit USDT and earn daily. " * 120 + "</p></body></html>"
     assert rendered_non_content(tmp_path, [_snapshot_with_html(tmp_path, html)]) is None
+
+
+def test_browser_loss_is_retryable_on_resume() -> None:
+    lost = SimpleNamespace(notes=["pipeline error: TargetClosedError: Browser has been closed"])
+    ordinary = SimpleNamespace(notes=["pipeline error: site timeout"])
+
+    assert browser_was_lost(lost)  # type: ignore[arg-type]
+    assert not browser_was_lost(ordinary)  # type: ignore[arg-type]

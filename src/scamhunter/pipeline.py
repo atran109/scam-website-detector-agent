@@ -256,8 +256,14 @@ async def _open_and_snapshot(
     except PlaywrightError as exc:
         notes.append(f"browser: {str(exc).splitlines()[0][:200]}")
     finally:
-        await context.tracing.stop(path=str(site_dir / f"trace_{first_index:02d}.zip"))
-        await context.close()
+        try:
+            await context.tracing.stop(path=str(site_dir / f"trace_{first_index:02d}.zip"))
+        except PlaywrightError as exc:
+            notes.append(f"browser trace unavailable: {str(exc).splitlines()[0][:160]}")
+        try:
+            await context.close()
+        except PlaywrightError as exc:
+            notes.append(f"browser context close failed: {str(exc).splitlines()[0][:160]}")
     return Capture(snapshots, notes, loaded), empty_shell
 
 
@@ -860,6 +866,13 @@ def load_checkpoint(path: Path) -> dict[str, SiteResult]:
     return {r.site.site_id: r for r in results}
 
 
+def browser_was_lost(result: SiteResult) -> bool:
+    """A shared Chromium crash is transient and must not make `--resume` skip the site."""
+    return any(
+        "TargetClosedError" in note or "browser has been closed" in note for note in result.notes
+    )
+
+
 class NoSitesVisited(RuntimeError):
     """A run that should have loaded sites loaded none (a wiring bug or a dead network)."""
 
@@ -914,61 +927,91 @@ async def run_pipeline(
 
     checkpoint = run_dir / "checkpoint.jsonl"
     done = load_checkpoint(checkpoint) if resume else {}
-    todo = [s for s in sites if s.site_id not in done]
-    print(f"{len(sites)} sites, {len(done)} already done, {len(todo)} to process")
+    retry_ids = {site_id for site_id, result in done.items() if browser_was_lost(result)}
+    todo = [s for s in sites if s.site_id not in done or s.site_id in retry_ids]
+    finished = len(done) - len(retry_ids)
+    print(
+        f"{len(sites)} sites, {finished} already done, {len(todo)} to process"
+        f" ({len(retry_ids)} browser-loss retries)"
+    )
 
     llm = LLMClient(settings.llm.gateway_url)
     lock = asyncio.Lock()
-    semaphore = asyncio.Semaphore(concurrency or settings.run.concurrency)
+    requested_concurrency = concurrency or settings.run.concurrency
     # Wall-clock cap per site. With navigation it adds the agent's own budget; with operator
     # confirmation a person is in the loop, so only the agent's watchdog and stop file bound it.
     site_timeout: float | None = settings.run.site_timeout_s
     if nav is not None:
         site_timeout = None if nav.confirm else site_timeout + nav.limits.max_seconds
     async with async_playwright() as pw:
-        browser = await launch_browser(pw, proxy)
-        ctx = RunContext(
-            settings=settings, run_dir=run_dir, llm=llm, proxy=proxy, browser=browser, nav=nav
-        )
 
-        async def one(site: Site) -> SiteResult | None:
-            started = datetime.now(UTC)
-            if nav is not None and nav.stop_file is not None and nav.stop_file.exists():
-                print(f"  {site.site_id} skipped: stop file present", flush=True)
-                return None
-            async with semaphore:
+        async def process_group(group: list[Site], group_concurrency: int) -> list[SiteResult]:
+            """Process a group in one browser; callers isolate crash retries one site at a time."""
+            browser = await launch_browser(pw, proxy)
+            ctx = RunContext(
+                settings=settings, run_dir=run_dir, llm=llm, proxy=proxy, browser=browser, nav=nav
+            )
+            semaphore = asyncio.Semaphore(group_concurrency)
+
+            async def one(site: Site) -> SiteResult | None:
+                started = datetime.now(UTC)
+                if nav is not None and nav.stop_file is not None and nav.stop_file.exists():
+                    print(f"  {site.site_id} skipped: stop file present", flush=True)
+                    return None
+                async with semaphore:
+                    try:
+                        result = await asyncio.wait_for(
+                            process_site(ctx, site, triage[site.site_id]), timeout=site_timeout
+                        )
+                    except TimeoutError:
+                        result = _error_result(
+                            site,
+                            triage[site.site_id],
+                            "site timeout",
+                            started,
+                            settings,
+                            ctx.brands,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - one site never crashes the run
+                        traceback.print_exc()
+                        result = _error_result(
+                            site,
+                            triage[site.site_id],
+                            f"{type(exc).__name__}: {exc}",
+                            started,
+                            settings,
+                            ctx.brands,
+                        )
+                async with lock:
+                    with checkpoint.open("a") as f:
+                        f.write(result.model_dump_json() + "\n")
+                c = result.classification
+                print(
+                    f"  {site.site_id} {c.verdict.value:<8} p={c.scam_probability:.2f} "
+                    f"{c.evidence_source.value:<12} addrs={len(result.addresses)}"
+                    f"+{len(result.low_confidence_addresses)} {site.url}",
+                    flush=True,
+                )
+                return result
+
+            try:
+                attempted = await asyncio.gather(*(one(s) for s in group))
+            finally:
                 try:
-                    result = await asyncio.wait_for(
-                        process_site(ctx, site, triage[site.site_id]), timeout=site_timeout
-                    )
-                except TimeoutError:
-                    result = _error_result(
-                        site, triage[site.site_id], "site timeout", started, settings, ctx.brands
-                    )
-                except Exception as exc:  # noqa: BLE001 - one site never crashes the run
-                    traceback.print_exc()
-                    result = _error_result(
-                        site,
-                        triage[site.site_id],
-                        f"{type(exc).__name__}: {exc}",
-                        started,
-                        settings,
-                        ctx.brands,
-                    )
-            async with lock:
-                with checkpoint.open("a") as f:
-                    f.write(result.model_dump_json() + "\n")
-            c = result.classification
+                    await browser.close()
+                except PlaywrightError:
+                    pass
+            return [result for result in attempted if result is not None]
+
+        first_results = await process_group(todo, requested_concurrency) if todo else []
+        lost_ids = {r.site.site_id for r in first_results if browser_was_lost(r)}
+        if lost_ids:
             print(
-                f"  {site.site_id} {c.verdict.value:<8} p={c.scam_probability:.2f} "
-                f"{c.evidence_source.value:<12} addrs={len(result.addresses)}"
-                f"+{len(result.low_confidence_addresses)} {site.url}",
+                f"retrying {len(lost_ids)} browser-loss sites in fresh isolated browsers",
                 flush=True,
             )
-            return result
-
-        await asyncio.gather(*(one(s) for s in todo))
-        await browser.close()
+        for site in (s for s in todo if s.site_id in lost_ids):
+            await process_group([site], 1)
     await llm.aclose()
     check_visited(
         sum(1 for s in todo if needs_visit(triage[s.site_id])), count_visited(run_dir, todo)
