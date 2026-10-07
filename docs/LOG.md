@@ -1059,3 +1059,9 @@ On the 43 effective live sites of `capture-2` (classified from saved evidence, 1
 - What navigation found on the labelled sites that A navigated: 145 reached the registration form and a named gate; 071 and 117 had nothing behind them (a loader, an app-download page); 012 (not in this table: p=0.96) gave three addresses. B alone would have skipped 145's gate finding.
 - **Cost of the union over A:** 5 more sites (022, 031, 070, 078, 082) at about $0.05–0.22 each from the gateway log (the pilot's three-site rerun cost $0.35 in total), so about $0.5 on a 43-site live set.
 - **Recommendation (not applied):** A or B, i.e. keep the verdict test (it catches scam-looking pages with no visible account control) and add the account-flow signal (it catches low-probability sites with a login or register control). `--force-navigation` stays for hand-picked runs. "Crypto signals" as a third leg (coin names, deposit wording on the page) was not measured. **003, a likely scam at p=0.22, is skipped by every rule here;** it needs a better verdict, not a trigger.
+
+## 2026-10-07 19:00 · H+? · RESULT [limit]: final 13-variant mock regression after M4/M5 (`pmock-3`)
+- The run completed after the previous session reached its usage limit: selftest **50/50**; all **13/13 variants passed** through `process_site`; gateway-log cost **$1.0291**.
+- Every solvable variant found the correct **6/6** addresses and produced a scam verdict. Every gated variant stopped at the correct reason (`invite_code`, `sms_verification`, `captcha`, or `wallet_required`).
+- Safety and correctness: no forbidden requests, loopback-guard hits, wrong primary addresses, or unsafe linked domains. `app_domain` and `self_redirect` recorded only their expected linked target. The `image_captcha` variant exercised one policy refusal and ended at `captcha`.
+- This closes the regression requested after the pilot fixes. The run artifact remains in ignored `runs/pmock-3/`.
