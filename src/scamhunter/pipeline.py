@@ -41,6 +41,7 @@ from scamhunter.classify.llm_judge import judge
 from scamhunter.classify.scorer import score_content, score_without_content
 from scamhunter.classify.signals import address_signal, content_signals, triage_signals
 from scamhunter.config import Settings, require_egress_proxy
+from scamhunter.extract.app_downloads import find_app_downloads, merge_targets
 from scamhunter.extract.blocklist import load_blocklist
 from scamhunter.extract.extractor import extract, merge_all
 from scamhunter.llm.client import LLMClient, LLMError, TokenUsage
@@ -355,6 +356,7 @@ class Analysis:
     usage: TokenUsage
     final_url: str | None = None
     triage: TriageResult | None = None  # set when analysis revised the triage status (parked)
+    app_downloads: list[str] = field(default_factory=list)  # app files and store links (M4)
 
 
 def rendered_non_content(
@@ -568,7 +570,16 @@ async def analyze(
     classification, score_notes = score_content(
         signals, judgment, threshold, partial=partial, archived=content.archived
     )
-    return Analysis(classification, addresses, notes + score_notes, usage, landing.url, revised)
+    app_downloads = merge_targets(*(find_app_downloads(c) for c in contents.values()))
+    return Analysis(
+        classification,
+        addresses,
+        notes + score_notes,
+        usage,
+        landing.url,
+        revised,
+        app_downloads,
+    )
 
 
 # ============================================================
@@ -601,6 +612,7 @@ def build_result(
         low_confidence_addresses=low,
         other_addresses=[],
         navigation=navigation,
+        app_downloads=analysis.app_downloads,
         identity_used=identity_id,
         notes=notes + analysis.notes,
         trace_path=trace_path,

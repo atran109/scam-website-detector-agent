@@ -82,7 +82,34 @@ def denied_targets() -> list[str]:
 # ---------- 1. Container hardening ----------
 
 
+def check_read_only_root() -> None:
+    """The image is immutable: writes outside the mounts and tmpfs fail with EROFS."""
+    import errno
+
+    outcomes = {}
+    for path in ("/app/.selftest-write", "/usr/local/.selftest-write", "/etc/.selftest-write"):
+        try:
+            Path(path).write_text("x")
+            Path(path).unlink()
+            outcomes[path] = "WRITABLE"
+        except OSError as exc:
+            outcomes[path] = "EROFS" if exc.errno == errno.EROFS else f"errno {exc.errno}"
+    try:
+        scratch = Path("/tmp/.selftest-write")
+        scratch.write_text("x")
+        scratch.unlink()
+        tmp = "writable"
+    except OSError as exc:
+        tmp = f"errno {exc.errno}"
+    record(
+        "root filesystem is read-only",
+        all(v == "EROFS" for v in outcomes.values()) and tmp == "writable",
+        f"writes: {outcomes}; /tmp (tmpfs): {tmp}",
+    )
+
+
 def check_container() -> None:
+    check_read_only_root()
     record("non-root user", os.getuid() != 0, f"uid={os.getuid()}")
     cap_eff = next(
         line.split()[1]
@@ -216,6 +243,18 @@ def check_sandbox_processes() -> None:
     procs = chrome_processes()
     flagged = [pid for pid, cmdline in procs if "--no-sandbox" in cmdline]
     record("no --no-sandbox flag", bool(procs) and not flagged, f"{len(procs)} chrome procs")
+
+    # the browser process itself: no --type=, and not the crash-report helpers
+    browser_procs = [
+        cmdline
+        for _, cmdline in procs
+        if "--type=" not in cmdline and "chrome_crashpad_handler" not in cmdline
+    ]
+    record(
+        "extensions disabled",
+        bool(browser_procs) and all("--disable-extensions" in c for c in browser_procs),
+        f"{len(browser_procs)} browser process(es) with --disable-extensions",
+    )
 
     renderers = [pid for pid, cmdline in procs if "--type=renderer" in cmdline]
     if not renderers:

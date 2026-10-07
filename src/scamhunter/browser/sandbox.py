@@ -1,5 +1,7 @@
 """Launch the browser and create hardened, per-site contexts with routing rules."""
 
+import re
+
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, Route
 
 from scamhunter.config import BrowserSettings, is_loopback_url
@@ -63,6 +65,26 @@ async def restrict_to_loopback(context: BrowserContext) -> list[str]:
     return blocked
 
 
+# Only these schemes may be loaded (M5, LOG 2026-10-07). The pattern matches everything else, so
+# normal requests never reach the Python handler. A page cannot navigate to file: itself and the
+# policy never asks for it, but Playwright's own `goto` would load it, and chrome:, view-source:
+# or a custom scheme are not the site's business either.
+_ODD_SCHEME = re.compile(r"^(?!(?:https?|wss?|data|blob|about):)", re.I)
+
+
+async def restrict_schemes(context: BrowserContext) -> list[str]:
+    """Abort every request whose scheme is not http(s), ws(s), data, blob or about. Returns the
+    list that records the aborted URLs (for tests)."""
+    blocked: list[str] = []
+
+    async def handler(route: Route) -> None:
+        blocked.append(route.request.url)
+        await route.abort("blockedbyclient")
+
+    await context.route(_ODD_SCHEME, handler)
+    return blocked
+
+
 def user_agent(browser: Browser, mobile: bool) -> str:
     """A normal Chrome UA matching the real engine version (no "HeadlessChrome")."""
     major = browser.version.split(".")[0]
@@ -102,6 +124,7 @@ async def new_context(
         ignore_https_errors=ignore_https_errors,  # only for sites triage saw with a bad cert
     )
     context.set_default_timeout(settings.navigation_timeout_ms)
+    context.blocked_schemes = await restrict_schemes(context)  # type: ignore[attr-defined]
     if loopback_only:
         context.blocked_urls = await restrict_to_loopback(context)  # type: ignore[attr-defined]
     context.on("page", _close_if_popup)

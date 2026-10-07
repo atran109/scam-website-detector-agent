@@ -79,6 +79,7 @@ def to_record(result: SiteResult, run_dir: Path, out_dir: Path) -> OutputRecord:
         crypto_addresses=[a.address for a in result.addresses],
         low_confidence_addresses=[a.address for a in result.low_confidence_addresses],
         address_details=details,
+        app_download_urls=result.app_downloads,
         navigation=NavigationSummary(
             registered=nav.registered,
             reached_deposit=nav.reached_deposit,

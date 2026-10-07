@@ -5,6 +5,7 @@ context (desktop or phone, as capture chose), a disposable mailbox and the site'
 domain as the only place it may go. Every action still goes through `Policy`; the stop file and
 the optional submit confirmation are the operator's controls (`NavigationLoop`)."""
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -36,6 +37,7 @@ from scamhunter.llm.client import PRICES_PER_MTOK, LLMClient, TokenUsage
 from scamhunter.models import Classification, Identity, Site, TriageResult, Verdict
 
 log = logging.getLogger(__name__)
+MAILBOX_ATTEMPTS = 3  # creating the inbox: tries, with 2 s and 4 s waits between them
 
 # (identity, mailbox, close) for one site. Real runs use mail.tm through the egress proxy; the
 # mock regression plugs in the mock exchange's inbox.
@@ -101,12 +103,21 @@ def mailtm_factory(proxy: str) -> MailboxFactory:
     async def make(site: Site) -> tuple[Identity, Mailbox | None, Callable[[], Awaitable[None]]]:
         client = httpx.AsyncClient(proxy=proxy, timeout=20)
         box = MailTmMailbox(client)
-        try:
-            address = await box.create()
-        except Exception as exc:  # noqa: BLE001 - no mailbox is a gate, not a crash
-            log.warning("mail.tm unavailable (%s: %s)", type(exc).__name__, exc)
-            return new_identity("mailbox-unavailable@invalid.example"), None, client.aclose
-        return new_identity(address), box, client.aclose
+        for attempt in range(MAILBOX_ATTEMPTS):  # a transient error is retried with backoff
+            try:
+                address = await box.create()
+                return new_identity(address), box, client.aclose
+            except Exception as exc:  # noqa: BLE001 - no mailbox is a gate, not a crash
+                log.warning(
+                    "mail.tm unavailable (%s: %s), attempt %d of %d",
+                    type(exc).__name__,
+                    exc,
+                    attempt + 1,
+                    MAILBOX_ATTEMPTS,
+                )
+                if attempt + 1 < MAILBOX_ATTEMPTS:
+                    await asyncio.sleep(2**attempt * 2)
+        return new_identity("mailbox-unavailable@invalid.example"), None, client.aclose
 
     return make
 

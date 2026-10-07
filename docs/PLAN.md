@@ -121,7 +121,7 @@ Adjust the hours to the real schedule.
 - [ ] Classifier returns label, scam type, confidence, reasons, evidence references
 - [ ] Internal `uncertain` band, mapped to the binary label for output
 - [ ] Verdict bias: `scam_threshold: 0.45` (lean toward recall); report precision/recall at 0.45 and 0.5 in the README
-- [ ] App-download targets as evidence (fix 8 of the pilot post-mortem, LOG 2026-10-07): record `.apk` / `.mobileconfig` / app-store URLs found in page scripts and config (pilot site 117: `BTCC.apk`, `BTCC.mobileconfig` from `config.js`) in the output without downloading; consider one capture with a mobile UA for pages that branch on it
+- [x] App-download targets as evidence (fix 8, LOG 2026-10-07 16:30): `extract/app_downloads.py`, output field `app_download_urls`, never fetched. The mobile-UA capture variant is cut
 - [ ] Decide the navigation trigger (open decision of 2026-10-07 03:10): account-flow or crypto signals instead of verdict-based
 - [ ] Re-classify after navigation with the new evidence
 - [ ] Dead-site policy in the scorer: Wayback shrink factor, signals-only band (0.5–0.65), `evidence_source` on every record; calibrate on hand labels incl. dead sites
@@ -133,15 +133,15 @@ Adjust the hours to the real schedule.
 
 ### M5. Full hardening
 
-- [ ] Container: read-only root filesystem (`cap_drop`, `no-new-privileges` and limits already done in M1)
+- [x] Container: read-only root filesystem on crawler, gateway and proxy (LOG 2026-10-07 16:30); selftest proves it
 - [x] Stop the connection to off-site navigation targets (LOG 2026-10-07 15:10): `browser/nav_guard.py` cancels off-site script navigations and `window.open` inside the page (Navigation API, registered through CDP so the allowed domain follows a confirmed hop); selftest proves no tunnel opens; the route guard and `back` stay as backups. Not covered: server-side redirects
-- [ ] Re-run `make selftest`; review `egress.log` for anything unexpected
+- [x] Re-run `make selftest` (50/50); review `egress.log` for anything unexpected: `eval/egress_review.py` over 40 logs, 0 allowed requests to private/link-local/loopback destinations, 0 allowed non-web ports
 - [x] Replace the nip.io DNS-rebinding probe with a DNS-independent test (a local resolver that returns a link-local IP for a test name; assert the proxy refuses it); an inconclusive result must fail closed for real-site runs (moved here from "must do before step F", LOG 2026-10-06 21:06)
 - [x] Verify the Chromium sandbox is on inside the container (no silent `--no-sandbox`): selftest checks the flag and the renderer's seccomp filter and user namespace
-- [ ] Browser: block non-http(s) schemes and service workers; close popups; no extensions
-- [ ] LLM: page content wrapped as untrusted data; structured outputs validated
-- [ ] Per-site timeouts at every level; bounded concurrency; retries with backoff
-- [ ] Secrets only in `.env`; never logged
+- [x] Browser: block non-http(s) schemes (`sandbox.restrict_schemes`) and service workers; close popups; no extensions (selftest checks `--disable-extensions`)
+- [x] LLM: page content wrapped as untrusted data (`sanitize.untrusted`); structured outputs validated (JSON schema, Pydantic, tool-call parsing)
+- [x] Per-site timeouts at every level; bounded concurrency; retries with backoff (audit in LOG 2026-10-07 16:30; mail.tm inbox creation now retries)
+- [x] Secrets only in `.env`; never logged (audit and `tests/test_no_secrets.py`)
 
 ### M6. Batch run and quality checks
 

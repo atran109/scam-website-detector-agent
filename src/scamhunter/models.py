@@ -403,6 +403,7 @@ class SiteResult(BaseModel):
     low_confidence_addresses: list[CryptoAddress] = []  # tier LOW_CONFIDENCE, scam sites
     other_addresses: list[CryptoAddress] = []  # seen on not_scam sites; not in output lists
     navigation: NavigationTrace | None
+    app_downloads: list[str] = []  # app files and store pages the site points at (never fetched)
     identity_used: str | None = None  # Identity.identity_id, not the secrets
     notes: list[str] = []  # oddities worth a human look
     cluster_id: str | None = None  # (P2) shared operator group
@@ -477,6 +478,7 @@ class OutputRecord(OutputModel):
     crypto_addresses: list[str]  # tier primary, strings as shown
     low_confidence_addresses: list[str]
     address_details: list[AddressDetail]
+    app_download_urls: list[str] = []  # .apk/.ipa/.mobileconfig/store links found, never fetched
     navigation: NavigationSummary | None
     notes: list[str]
 
