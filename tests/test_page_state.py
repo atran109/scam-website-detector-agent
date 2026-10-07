@@ -56,6 +56,12 @@ def test_stated_minimum() -> None:
     assert facts(text="Minimum deposit: 30 USDT").stated_minimum == "30"
     assert facts(text="min. recharge 1,000 USDT").stated_minimum == "1000"
     assert facts(text="At least some funds").stated_minimum is None
+    # pilot site 012 (2026-10-07)
+    assert facts(text="Enter the amount you want to deposit (minimum $50).").stated_minimum == "50"
+    assert facts(text="Minimum deposit is $50.00").stated_minimum == "50.00"
+    assert facts(text="Amount must be at least $50.00").stated_minimum == "50.00"
+    assert facts(text="最低充值 100 USDT").stated_minimum == "100"
+    assert facts(text="Password: at least 8 characters").stated_minimum is None
 
 
 def test_card_and_bank_fields_are_detected_from_fields_not_prose() -> None:

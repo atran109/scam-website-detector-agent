@@ -10,6 +10,7 @@ the first refusal or failure. Every refused action is kept in the trace with the
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -348,8 +349,11 @@ class NavigationLoop:
         self._paused = 0.0
         self.blocked_navigations: list[str] = []  # off-site page loads the route guard stopped
         self._blocked_reported = 0
-        self._filled = False
-        self._submit_confirmed = False
+        self._filled = False  # a fill or select since the last submit-type action
+        self._password_filled = False  # one of them went into a password field
+        self._password_asks = 0  # confirmations asked at password submits (register, login)
+        self._form_asked = False  # confirmation asked at a submit without a password field
+        self._page_seen: dict[str, tuple[int, int]] = {}  # page fingerprint -> (first step, times)
 
     # ---------- public ----------
 
@@ -521,10 +525,14 @@ class NavigationLoop:
                 break
             action = call.action
             what = describe_action(action, state)
-            if action.type in (ActionType.FILL, ActionType.SELECT):
-                self._filled = (
-                    self._filled or self.policy.check(action, state.elements, state.facts).allowed
-                )
+            if (
+                action.type in (ActionType.FILL, ActionType.SELECT)
+                and self.policy.check(action, state.elements, state.facts).allowed
+            ):
+                self._filled = True
+                target = next((e for e in state.elements if e.id == action.element_id), None)
+                if target is not None and target.input_type == "password":
+                    self._password_filled = True
             if action.type == ActionType.DONE:
                 self._record(turn, state, action, True, None, "done")
                 parts.append(what)
@@ -546,7 +554,7 @@ class NavigationLoop:
             if decision.hop_url:
                 result = await self._execute_hop(turn, state, decision)
             else:
-                if await self._declined_submit(action, what, state):
+                if await self._declined_submit(action, what, state, parts):
                     self._record(turn, state, action, False, "declined by the operator", "refused")
                     parts.append(f"{what} → declined by the operator")
                     stop = (StopReason.USER_STOP, None)
@@ -586,41 +594,79 @@ class NavigationLoop:
                     step.screenshot_path = screenshot
             if new_addresses and len(self.steps) > recorded_from:
                 self.steps[-1].new_addresses = new_addresses
+            if note := self._page_note(turn, state, batch):
+                self.history[-1] += f" | {note}"
         if len(self.steps) > recorded_from:  # the reply's tokens go on its first action
             self.steps[recorded_from].tokens_in = self.usage.tokens_in - tokens[0]
             self.steps[recorded_from].tokens_out = self.usage.tokens_out - tokens[1]
         return ran_any
 
-    async def _declined_submit(self, action: AgentAction, what: str, state: PageState) -> bool:
-        """With confirmation on, ask once per site before the first submit-type action that
-        follows a fill. True if the operator says no (or no answer can be given)."""
-        if (
-            self.confirm is None
-            or self._submit_confirmed
-            or not self._filled
-            or action.type not in SUBMITTING
-        ):
+    async def _declined_submit(
+        self, action: AgentAction, what: str, state: PageState, pending: list[str]
+    ) -> bool:
+        """With confirmation on, ask before a submit-type action that follows fills: the first
+        two submits after a password-field fill (registration, then login) and the first submit
+        of a form without one (2026-10-07: the single per-site question was spent on 145's
+        email-lookup click, and its registration was not asked about). `pending` are this
+        reply's earlier calls, which are not in the history yet. True if the operator says no
+        (or no answer can be given)."""
+        if self.confirm is None or not self._filled or action.type not in SUBMITTING:
             return False
         element = next((e for e in state.elements if e.id == action.element_id), None)
         if element is not None and element.role in NOT_A_SUBMIT_ROLES:
             return False  # ticking "I agree" submits nothing; ask at the button
-        self._submit_confirmed = True
+        password = self._password_filled
+        self._filled = self._password_filled = False  # this submit uses up the pending fills
+        if password:
+            if self._password_asks >= 2:
+                return False
+            self._password_asks += 1
+            kind = "a form with a password (registration or login)"
+        else:
+            if self._form_asked:
+                return False
+            self._form_asked = True
+            kind = "a form"
         shot_dir = self.evidence.site_dir / "snapshots" / f"a{self.evidence._count:03d}"
         # as seen from the repo on the host (the container mounts runs/ at /app/runs)
         shot = Path("runs") / self.evidence.run_dir.name
         shot /= (shot_dir / "screenshot.png").relative_to(self.evidence.run_dir)
+        earlier = [f"  {h[:240]}" for h in self.history if " fill " in h or "fill [" in h]
+        this_reply = [f"  {p[:240]}" for p in pending]
         question = (
-            f"step {self._turns} on {state.url}\nabout to run: {what}\n"
-            "typed so far this site (placeholders, never the real values):\n"
-            + "\n".join(f"  {h[:240]}" for h in self.history if " fill " in h or "fill [" in h)
-            + "\n"
-            f"latest screenshot: {shot}"
+            f"SUBMIT {kind}: step {self._turns} on {state.url}\nabout to run: {what}\n"
+            "in this same step, just before it (placeholders, never the real values):\n"
+            + ("\n".join(this_reply) or "  (nothing)")
+            + "\nearlier steps' typing on this site:\n"
+            + ("\n".join(earlier) or "  (nothing)")
+            + f"\nlatest screenshot: {shot}"
         )
         started = time.time()
         try:
             return not await self.confirm(question)
         finally:
             self._paused += time.time() - started
+
+    def _page_note(self, turn: int, before: PageState, batch: list) -> str:
+        """Where the step left the browser, for the history (2026-10-07: 128 re-checked the same
+        member pages for 24 steps and `goto /deposit` landed on `/` without the model noticing).
+        Compares the page before the step with the snapshot just taken."""
+        url = self.page.url
+        text = self.evidence.last_text
+        fingerprint = f"{url}\n{hashlib.sha1(text.encode()).hexdigest()}"
+        first, times = self._page_seen.get(fingerprint, (turn, 0))
+        self._page_seen[fingerprint] = (first, times + 1)
+        notes = []
+        gotos = [c.action.url for c in batch if isinstance(c, ParsedCall) and c.action.url]
+        if gotos and _path(gotos[-1]) != _path(url):
+            notes.append(f"redirected: asked {_path(gotos[-1])}, got {_path(url)}")
+        elif url != before.url:
+            notes.append(f"page now {_path(url)}")
+        elif text.strip() == before.text.strip():
+            notes.append("page unchanged")
+        if times >= 1:
+            notes.append(f"same page as step {first}, now seen {times + 1} times")
+        return "; ".join(notes)
 
     async def _confirm_hop(self, state: PageState, decision: Decision) -> Decision:
         """Ask the operator before the one cross-domain hop. No confirmation callback (a run
@@ -930,6 +976,12 @@ def page_cycle(pages: list[str]) -> tuple[int, int]:
         if repeats > best[1]:
             best = (period, repeats)
     return best
+
+
+def _path(url: str) -> str:
+    """Path and fragment of a URL, short, for history lines."""
+    parts = urlparse(url)
+    return ((parts.path or "/") + (f"#{parts.fragment}" if parts.fragment else ""))[:80]
 
 
 def _detail(result: ActionResult) -> str:

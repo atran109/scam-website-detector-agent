@@ -121,6 +121,8 @@ Adjust the hours to the real schedule.
 - [ ] Classifier returns label, scam type, confidence, reasons, evidence references
 - [ ] Internal `uncertain` band, mapped to the binary label for output
 - [ ] Verdict bias: `scam_threshold: 0.45` (lean toward recall); report precision/recall at 0.45 and 0.5 in the README
+- [ ] App-download targets as evidence (fix 8 of the pilot post-mortem, LOG 2026-10-07): record `.apk` / `.mobileconfig` / app-store URLs found in page scripts and config (pilot site 117: `BTCC.apk`, `BTCC.mobileconfig` from `config.js`) in the output without downloading; consider one capture with a mobile UA for pages that branch on it
+- [ ] Decide the navigation trigger (open decision of 2026-10-07 03:10): account-flow or crypto signals instead of verdict-based
 - [ ] Re-classify after navigation with the new evidence
 - [ ] Dead-site policy in the scorer: Wayback shrink factor, signals-only band (0.5–0.65), `evidence_source` on every record; calibrate on hand labels incl. dead sites
 - [ ] **Decide the signals-only rule** (numbers in LOG 2026-10-05). `finance_terms_in_domain` no longer counts for dead sites (done); now 47 of 60 dead-site scam verdicts rest on weak signals only. Do NOT pick (a) "≥1 moderate" or (b) "≥3 weak" yet: after the full live run, compute the scam base rate on live sites and each signal's scam/legit ratio on live sites, and propose the rule from those. Re-run the count after the Chromium rechecks, Wayback and the sibling pass

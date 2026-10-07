@@ -38,9 +38,16 @@ WALLET_SIGNATURE = re.compile(
     r" in your wallet|personal_sign|eth_sendtransaction|eth_signtypeddata|permit2? signature",
     re.I,
 )
+# "Minimum deposit: 30 USDT", "min. recharge 1,000", "(minimum $50)", "Minimum deposit is
+# $50.00" (2026-10-07: pilot site 012's phrasings were missed, so the policy fell back to 100
+# and refused the page's own 50). "at least" counts only with a currency sign, so "at least 8
+# characters" on the same page is not taken for an amount.
+_CURRENCY = r"(?:US\$|\$|USD\s*|USDT\s*|€|¥|￥)"
 STATED_MINIMUM = re.compile(
-    r"(?:min(?:imum)?\.?(?:\s+(?:deposit|recharge|amount|order))?|至少|最低)\s*[:：]?\s*"
-    r"(?:of\s+)?(\d[\d,]*(?:\.\d+)?)",
+    r"(?:min(?:imum)?\.?(?:\s+(?:deposit|recharge|amount|order|top[- ]?up))?(?:\s+is)?"
+    r"|至少|最低(?:充值|存款|金额)?|≥|>=)\s*[:：]?\s*(?:of\s+)?" + _CURRENCY + r"?\s*"
+    r"(\d[\d,]*(?:\.\d+)?)"
+    r"|at\s+least\s+" + _CURRENCY + r"\s*(\d[\d,]*(?:\.\d+)?)",
     re.I,
 )
 
@@ -250,7 +257,7 @@ def compute_facts(
     return PageFacts(
         url=url,
         is_deposit_page=is_deposit,
-        stated_minimum=minimum.group(1).replace(",", "") if minimum else None,
+        stated_minimum=(minimum.group(1) or minimum.group(2)).replace(",", "") if minimum else None,
         has_card_or_bank_fields=card_bank,
         wallet_signature_request=bool(WALLET_SIGNATURE.search(text)),
         captcha=captcha,

@@ -198,3 +198,29 @@ def test_a_shared_evm_address_counts_for_the_coin_selected_when_it_appeared() ->
     assert evm_key_for_selection("USDT", "BEP20") is None  # another EVM network: not a target
     assert evm_key_for_selection("USDT", "TRC20") is None
     assert evm_key_for_selection("BTC", None) is None
+
+
+def test_the_history_says_where_the_page_ended() -> None:
+    """Pilot sites 128 (goto /deposit landed on /) and 012 (the same pages again and again)."""
+    from types import SimpleNamespace
+
+    from scamhunter.agent.loop import NavigationLoop
+    from scamhunter.agent.tools import ParsedCall
+    from scamhunter.models import ActionType, AgentAction
+
+    page = SimpleNamespace(url="https://shop.test/")
+    evidence = SimpleNamespace(last_text="Home page text")
+    loop = NavigationLoop.__new__(NavigationLoop)
+    loop.page, loop.evidence, loop._page_seen = page, evidence, {}
+    before = SimpleNamespace(url="https://shop.test/member", text="Member centre")
+    goto = ParsedCall(
+        AgentAction(type=ActionType.GOTO, url="https://shop.test/deposit", rationale="t"), None, "x"
+    )
+    assert loop._page_note(9, before, [goto]) == "redirected: asked /deposit, got /"
+    click = ParsedCall(AgentAction(type=ActionType.CLICK, element_id=3, rationale="t"), None, "y")
+    before_home = SimpleNamespace(url="https://shop.test/", text="Home page text")
+    assert loop._page_note(10, before_home, [click]) == (
+        "page unchanged; same page as step 9, now seen 2 times"
+    )
+    page.url, evidence.last_text = "https://shop.test/member", "Member centre"
+    assert loop._page_note(11, before_home, [click]) == "page now /member"

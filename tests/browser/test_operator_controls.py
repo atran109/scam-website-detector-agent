@@ -14,7 +14,7 @@ from scamhunter.agent.prompts import GOAL
 from scamhunter.mock_mode import MockRun, run_on_mock
 from scamhunter.models import StopReason
 
-from .test_agent_mock_site import Solver, limits
+from .test_agent_mock_site import Solver, click, field, fill, limits, named
 
 pytestmark = pytest.mark.browser
 
@@ -78,6 +78,55 @@ def test_accepting_asks_once_and_the_wait_is_not_charged_to_the_budget(tmp_path:
     started = time.time()
     result = run_with(ScriptedDecider(Solver()), tmp_path, confirm=accept_slowly)
     wall = time.time() - started
-    assert len(asked) == 1, "asked once per site, not per submit"
+    assert asked and asked[0].startswith("SUBMIT a form with a password"), asked[:1]
+    assert len(asked) <= 3, "registration, login and one plain form at most"
     assert result.passed and result.run.trace.stop_reason == StopReason.GOAL_REACHED
     assert wall - result.run.seconds >= 2.5, "the 3 s pause counted against the wall-clock budget"
+
+
+def test_fills_of_the_same_step_are_shown_and_the_registration_submit_is_asked(
+    tmp_path: Path,
+) -> None:
+    """Fix 3 and 4 (2026-10-07): one reply fills the registration form and clicks Register; the
+    question lists those fills (they are not in the history yet). email_verify then asks again
+    for the code form (a form without a password)."""
+    asked: list[str] = []
+    solver = Solver()
+
+    ticked = {"agree": False}
+
+    def script(view: StepView):
+        email, confirm = field(view, "email"), field(view, "confirm")
+        if email and confirm:  # registration form: tick "agree", then fill and submit at once
+            if not ticked["agree"]:
+                ticked["agree"] = True
+                return [click(next(e for e in view.state.elements if "agree" in e.name.lower()))]
+            solver.agreed = True
+            return [
+                fill(email, "{identity.email}"),
+                fill(field(view, "password"), "{identity.password}"),
+                fill(confirm, "{identity.password}"),
+                click(named(view, "register")[-1]),
+            ]
+        return solver(view)
+
+    async def agree(question: str) -> bool:
+        asked.append(question)
+        return True
+
+    result = asyncio.run(
+        run_on_mock(
+            "email_verify",
+            lambda _: ScriptedDecider(script),
+            tmp_path,
+            limits(),
+            GOAL,
+            {"confirm": agree},
+        )
+    )
+    first = asked[0]
+    assert first.startswith("SUBMIT a form with a password")
+    same_step = first.split("in this same step")[1].split("earlier steps")[0]
+    assert "{identity.email}" in same_step and "{identity.password}" in same_step
+    assert any(q.startswith("SUBMIT a form:") for q in asked[1:]), "the code form is asked too"
+    assert result.passed
