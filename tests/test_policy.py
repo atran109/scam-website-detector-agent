@@ -173,6 +173,9 @@ def test_password_rules() -> None:
     assert not fill("hunter2", PASSWORD).allowed  # only the placeholder, never a literal
     assert not fill("{identity.password}", el(1, "textbox", "Username")).allowed
     assert fill("{identity.password}", el(1, "textbox", "Confirm password")).allowed
+    # Some scam kits expose password controls as type=text. The synthetic placeholder is still
+    # safe when the visible label unambiguously names a password field.
+    assert fill("{identity.password}", el(1, "textbox", "請輸入密碼（至少 6 個字元）")).allowed
 
 
 @pytest.mark.parametrize(

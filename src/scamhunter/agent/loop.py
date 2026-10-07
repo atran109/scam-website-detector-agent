@@ -356,9 +356,16 @@ class NavigationLoop:
         after-the-fact check with `back` in `_execute` stays."""
         request = route.request
         parts = urlparse(request.url)
+        top_level_navigation = False
+        if request.is_navigation_request():
+            try:
+                top_level_navigation = request.frame.parent_frame is None
+            except PlaywrightError:
+                # A newly created popup can issue its first request before Playwright exposes
+                # its Frame. Treat that as top-level so an off-site load still fails closed.
+                top_level_navigation = True
         if (
-            request.is_navigation_request()
-            and request.frame.parent_frame is None
+            top_level_navigation
             and parts.scheme in ("http", "https")
             and parts.hostname
             and registrable(parts.hostname) != self.policy.site_domain

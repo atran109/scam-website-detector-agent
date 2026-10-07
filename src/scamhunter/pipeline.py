@@ -873,6 +873,11 @@ def browser_was_lost(result: SiteResult) -> bool:
     )
 
 
+def retry_on_resume(result: SiteResult) -> bool:
+    """Resume heals failed records as well as completed records damaged by browser loss."""
+    return result.processing_status == ProcessingStatus.ERROR or browser_was_lost(result)
+
+
 class NoSitesVisited(RuntimeError):
     """A run that should have loaded sites loaded none (a wiring bug or a dead network)."""
 
@@ -927,7 +932,7 @@ async def run_pipeline(
 
     checkpoint = run_dir / "checkpoint.jsonl"
     done = load_checkpoint(checkpoint) if resume else {}
-    retry_ids = {site_id for site_id, result in done.items() if browser_was_lost(result)}
+    retry_ids = {site_id for site_id, result in done.items() if retry_on_resume(result)}
     todo = [s for s in sites if s.site_id not in done or s.site_id in retry_ids]
     finished = len(done) - len(retry_ids)
     print(

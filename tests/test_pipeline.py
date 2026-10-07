@@ -8,8 +8,8 @@ from urllib.parse import urlsplit
 import pytest
 
 from scamhunter.cli import URLS_PATH
-from scamhunter.models import DiscoveryStage, PageSnapshot, SiteStatus
-from scamhunter.pipeline import browser_was_lost, load_sites, rendered_non_content
+from scamhunter.models import DiscoveryStage, PageSnapshot, ProcessingStatus, SiteStatus
+from scamhunter.pipeline import browser_was_lost, load_sites, rendered_non_content, retry_on_resume
 
 
 def test_real_url_list_loads_all_160_in_order() -> None:
@@ -124,8 +124,15 @@ def test_content_page_is_not_non_content(tmp_path: Path) -> None:
 
 
 def test_browser_loss_is_retryable_on_resume() -> None:
-    lost = SimpleNamespace(notes=["pipeline error: TargetClosedError: Browser has been closed"])
-    ordinary = SimpleNamespace(notes=["pipeline error: site timeout"])
+    lost = SimpleNamespace(
+        notes=["pipeline error: TargetClosedError: Browser has been closed"],
+        processing_status=ProcessingStatus.COMPLETED,
+    )
+    failed = SimpleNamespace(notes=["pipeline error: site timeout"], processing_status="error")
+    ordinary = SimpleNamespace(notes=["site timeout"], processing_status="completed")
 
     assert browser_was_lost(lost)  # type: ignore[arg-type]
     assert not browser_was_lost(ordinary)  # type: ignore[arg-type]
+    assert retry_on_resume(lost)  # type: ignore[arg-type]
+    assert retry_on_resume(failed)  # type: ignore[arg-type]
+    assert not retry_on_resume(ordinary)  # type: ignore[arg-type]

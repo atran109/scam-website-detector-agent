@@ -100,6 +100,7 @@ CAPTCHA_LABEL = re.compile(
     re.I,
 )
 AMOUNT_FIELD = re.compile(r"amount|quantity|金额|\bsum\b", re.I)
+PASSWORD_FIELD = re.compile(r"password|passcode|密碼|密码", re.I)
 
 # The one cross-domain hop (DESIGN §5.5, decided 2026-10-07): a link on this site to another
 # registrable domain is followed only if its text says login/register/sign up/app/trade, it is
@@ -377,7 +378,7 @@ class Policy:
         is_password = element.input_type == "password"
         if is_password and value != "{identity.password}":
             return _block("password fields take only {identity.password}")
-        if "password" in names and not is_password and "password" not in _label(element).lower():
+        if "password" in names and not is_password and not PASSWORD_FIELD.search(_label(element)):
             return _block("{identity.password} goes only into a password field")
         if "@" in literal:
             return _block("use {identity.email} for email addresses")
