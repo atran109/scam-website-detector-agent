@@ -6,6 +6,7 @@ from scamhunter.agent.identity import new_identity
 from scamhunter.agent.policy import LoopDetector, Policy, registrable
 from scamhunter.browser.elements import Element
 from scamhunter.browser.page_state import CaptchaWidget, PageFacts
+from scamhunter.classify.domain import load_brands
 from scamhunter.models import ActionType, AgentAction, BlockedReason
 
 IDENTITY = new_identity("abc123@mail.test")
@@ -416,3 +417,60 @@ def test_captcha_fields_are_never_filled() -> None:
 def test_clicks_outside_the_widget_are_unaffected() -> None:
     page = facts(captcha=(RECAPTCHA,))
     assert decide(act(ActionType.CLICK, element_id=1), [el(1, "button", "Register")], page).allowed
+
+
+# ---------- the one cross-domain hop (DESIGN §5.5, 2026-10-07) ----------
+
+
+def link(name: str, href: str, policy: Policy | None = None):
+    policy = policy or Policy(SITE, IDENTITY, brands=load_brands())
+    action = act(ActionType.CLICK, element_id=1)
+    return policy.check(action, [el(1, "link", name, href=href)], facts())
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Login", "Log in", "Sign up", "Register now", "App", "Trade", "Start trading", "登录", "注册"],
+)
+def test_a_login_style_link_to_another_domain_is_a_hop_to_confirm(text: str) -> None:
+    d = link(text, "https://app.neurochain.uk/login")
+    assert d.allowed and d.hop_url == "https://app.neurochain.uk/login" and d.hop_text == text
+
+
+@pytest.mark.parametrize(
+    ("text", "href", "why"),
+    [
+        ("Login", "https://t.me/support", "social"),
+        ("Join us on WhatsApp", "https://wa.me/123", "social"),
+        ("Login", "https://www.facebook.com/x", "social"),
+        ("App", "https://apps.apple.com/app/x", "social"),
+        ("App", "https://play.google.com/store/apps/x", "social"),
+        ("Login", "https://www.binance.com/en/login", "the real Binance"),
+        ("Support", "https://other-domain.example/help", "only Login"),
+        ("Download App", "https://other-domain.example/x.apk", "only Login"),
+        ("Docs", "https://other-domain.example/docs", "only Login"),
+    ],
+)
+def test_other_cross_domain_links_are_refused_and_recorded(text: str, href: str, why: str) -> None:
+    d = link(text, href)
+    assert not d.allowed and d.hop_url is None
+    assert d.linked_url == href, "refused links still go to linked_domains"
+    assert why.lower() in d.reason.lower()
+
+
+def test_after_the_hop_the_agent_is_locked_to_the_new_domain_and_cannot_hop_again() -> None:
+    policy = Policy(SITE, IDENTITY, brands=load_brands())
+    assert link("Login", "https://app.neurochain.uk/", policy).hop_url
+    policy.lock_to("neurochain.uk")
+    assert policy.site_domain == "neurochain.uk"
+    again = link("Trade", "https://third-domain.example/", policy)
+    assert not again.allowed and "already used" in again.reason
+    back = link("Home", "https://" + SITE + "/", policy)  # the old domain is now off-site too
+    assert not back.allowed
+    policy.unlock()
+    assert policy.site_domain == SITE and link("Login", "https://x-app.example/", policy).hop_url
+
+
+def test_goto_never_hops() -> None:
+    d = decide(act(ActionType.GOTO, url="https://app.neurochain.uk/login"))
+    assert not d.allowed and d.hop_url is None

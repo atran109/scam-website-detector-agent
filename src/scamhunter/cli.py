@@ -60,13 +60,16 @@ def _selected(args: argparse.Namespace) -> list[Site]:
 
 
 async def ask_operator(question: str) -> bool:
-    """--confirm-submit: show what is about to happen and wait for the operator. Enter = go
-    ahead; n = stop this site. No terminal (end of input) counts as no."""
-    print("\n=== CONFIRM BEFORE FIRST SUBMIT ===\n" + question, flush=True)
+    """--confirm-submit: show what is about to happen and wait for the operator. Enter = yes;
+    n = no (a declined hop is refused and the run goes on; a declined first submit stops that
+    site). No terminal (end of input) counts as no."""
+    print("\n=== OPERATOR CONFIRMATION ===\n" + question, flush=True)
     try:
-        answer = await asyncio.to_thread(input, "Enter = go ahead, n = stop this site > ")
+        answer = await asyncio.to_thread(
+            input, "Enter = yes, n = no (a hop is refused; a submit stops this site) > "
+        )
     except EOFError:
-        print("(no terminal to answer on: stopping this site)", flush=True)
+        print("(no terminal to answer on: counted as no)", flush=True)
         return False
     return answer.strip().lower() not in {"n", "no", "stop"}
 

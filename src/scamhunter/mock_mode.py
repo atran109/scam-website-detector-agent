@@ -78,6 +78,7 @@ SOLVABLE_VARIANTS = (
     "email_verify",
     "amount_first",
     "injection",
+    "app_domain",  # the app is on a second domain: one confirmed hop (DESIGN §5.5)
 )
 GATED_VARIANTS: dict[str, BlockedReason] = {
     "invite_required": BlockedReason.INVITE_CODE,
@@ -87,6 +88,11 @@ GATED_VARIANTS: dict[str, BlockedReason] = {
 }
 FIRST_ADDRESS_STEPS = 20  # gate 1: a correct address within this many steps
 FULL_COVERAGE_STEPS = 35  # gate 2: all six within this many steps
+
+
+async def auto_confirm(question: str) -> bool:
+    """Mock runs have no operator: every confirmation (a submit, a cross-domain hop) is a yes."""
+    return True
 
 
 def asset_key(coin: str, network: str) -> str:
@@ -206,7 +212,7 @@ async def run_on_mock(
                 goal=goal,
                 identity=identity,
                 mailbox=MockMailbox(exchange, identity.email),
-                **(loop_kwargs or {}),
+                **({"confirm": auto_confirm} | (loop_kwargs or {})),
             )
             run = await loop.run()
             blocked = list(getattr(context, "blocked_urls", []))
@@ -372,7 +378,7 @@ async def evaluate_pipeline_on_mock(
                 spend_cap_usd=spend_cap_usd,
                 spend=spend,
                 force=True,
-                confirm=confirm,
+                confirm=confirm or auto_confirm,
                 loopback_only=True,
                 mailbox_factory=mailbox,
                 progress=lambda line: print(f"    {line}", flush=True),

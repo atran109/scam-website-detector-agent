@@ -15,6 +15,7 @@ from scamhunter.agent.identity import FIELDS, PLACEHOLDER, placeholders_in
 from scamhunter.agent.tools import ALLOWED_KEYS, MAX_WAIT_SECONDS
 from scamhunter.browser.elements import Element
 from scamhunter.browser.page_state import CARD_BANK_FIELD, CHECKBOX_CAPTCHAS, PageFacts
+from scamhunter.classify.domain import BrandToken, real_brand_domain
 from scamhunter.models import ActionType, AgentAction, BlockedReason, Identity
 
 DEFAULT_DEPOSIT_AMOUNT = "100"
@@ -96,6 +97,26 @@ CAPTCHA_LABEL = re.compile(
 )
 AMOUNT_FIELD = re.compile(r"amount|quantity|金额|\bsum\b", re.I)
 
+# The one cross-domain hop (DESIGN §5.5, decided 2026-10-07): a link on this site to another
+# registrable domain is followed only if its text says login/register/sign up/app/trade, it is
+# the first such hop, the operator confirms it, and the target is neither a major platform nor
+# a real brand's own site. After the hop the agent is locked to the new domain.
+HOP_TEXT = re.compile(
+    r"\b(?:log ?in|sign ?in|sign ?up|register|app|trade|trading)\b|登录|登錄|注册|註冊|交易", re.I
+)
+NOT_A_HOP_TEXT = re.compile(r"download|install|下载|下載", re.I)  # a file or an app-store pitch
+# Registrable domains of social networks, messengers and app stores: recorded, never followed.
+PLATFORM_DOMAINS = frozenset(
+    {
+        "t.me", "telegram.org", "telegram.me", "telegram.dog", "whatsapp.com", "wa.me",
+        "facebook.com", "fb.com", "fb.me", "messenger.com", "instagram.com", "threads.net",
+        "twitter.com", "x.com", "t.co", "tiktok.com", "youtube.com", "youtu.be", "linkedin.com",
+        "discord.com", "discord.gg", "reddit.com", "pinterest.com", "snapchat.com", "line.me",
+        "wechat.com", "weixin.qq.com", "qq.com", "medium.com", "github.com", "linktr.ee",
+        "apple.com", "google.com", "microsoft.com", "amazon.com",  # app stores and big platforms
+    }
+)  # fmt: skip
+
 
 def registrable(host: str) -> str:
     """Registrable domain; an IP address or localhost is its own site (mock mode)."""
@@ -113,6 +134,8 @@ class Decision:
     linked_url: str | None = (
         None  # a refused target on another site (NavigationTrace.linked_domains)
     )
+    hop_url: str | None = None  # allowed only if the operator confirms: the one cross-domain hop
+    hop_text: str = ""  # the link's text, for the operator's question and the trace
 
 
 ALLOW = Decision(True)
@@ -144,8 +167,12 @@ class Policy:
         site_domain: str,
         identity: Identity | None = None,
         mock_wallet_active: bool = False,
+        brands: list[BrandToken] | None = None,
     ) -> None:
         self.site_domain = site_domain
+        self.start_domain = site_domain
+        self.brands = brands or []
+        self.hops_used = 0  # the first and only cross-domain hop
         self.identity = identity
         self.mock_wallet_active = mock_wallet_active  # connect-wallet clicks need it (§5.5)
         self.captcha_clicks = 0  # at most one, on a checkbox-style widget (DESIGN §7)
@@ -205,11 +232,7 @@ class Policy:
         if KYC_UPLOAD.search(label):
             return _kyc_block()
         if element.href and not self._href_on_site(element.href):
-            return Decision(
-                False,
-                f"this link leaves {self.site_domain}; stay on the site",
-                linked_url=element.href,
-            )
+            return self._offsite_link(element)
         if WALLET_CONNECT.search(label):
             if self.mock_wallet_active:
                 return ALLOW
@@ -227,6 +250,41 @@ class Policy:
                     BlockedReason.PAYMENT_REQUIRED,
                 )
         return ALLOW
+
+    def _offsite_link(self, element: Element) -> Decision:
+        """A link to another registrable domain: refused (and recorded) unless it is the one
+        allowed hop, which is returned as `hop_url` for the loop to confirm with the operator."""
+        href = element.href
+        target = registrable(urlparse(href).hostname or "")
+        stay = f"this link leaves {self.site_domain}; stay on the site"
+        if self.hops_used:
+            return Decision(
+                False, f"{stay} (the one cross-domain hop was already used)", linked_url=href
+            )
+        if target in PLATFORM_DOMAINS:
+            return Decision(False, f"{stay} (a social or app-store link)", linked_url=href)
+        if brand := real_brand_domain(target, self.brands):
+            return Decision(False, f"{stay} (the real {brand} site)", linked_url=href)
+        text = element.name
+        if NOT_A_HOP_TEXT.search(text) or not HOP_TEXT.search(text):
+            return Decision(
+                False,
+                f"{stay} (only Login, Register, Sign up, App or Trade links)",
+                linked_url=href,
+            )
+        return Decision(
+            True, f"hop to {target} if the operator agrees", hop_url=href, hop_text=text
+        )
+
+    def lock_to(self, domain: str) -> None:
+        """After a confirmed hop the agent may go only to the new registrable domain."""
+        self.site_domain = domain
+        self.hops_used += 1
+
+    def unlock(self) -> None:
+        """The hop did not land where the link said: back to the original domain, hop unused."""
+        self.site_domain = self.start_domain
+        self.hops_used = 0
 
     def _click_at(self, action: AgentAction, elements: list[Element], facts: PageFacts) -> Decision:
         x, y = action.x, action.y

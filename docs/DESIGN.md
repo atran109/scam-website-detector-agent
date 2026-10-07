@@ -547,7 +547,8 @@ class NavigationTrace(BaseModel):
     logged_in: bool
     reached_deposit: bool
     assets_tried: list[str]        # coins/networks selected on deposit page
-    linked_domains: list[str] = [] # refused or undone target URLs on other sites (2026-10-06)
+    linked_domains: list[str] = [] # refused or undone target URLs on other sites (2026-10-06), and the hop target
+    hops: list[NavigationHop] = []  # the one confirmed cross-domain link (2026-10-07): step, source_url, link_text, target_url, target_domain
     cycle_warning_steps: list[int] = []  # steps where the page-cycle warning was shown (2026-10-06)
 
 # ---------- Result ----------
@@ -599,7 +600,8 @@ class NavigationSummary(BaseModel):
     steps: int
     stop_reason: StopReason
     blocked_at: BlockedReason | None
-    linked_domains: list[str] = [] # off-site targets the agent was refused or sent back from
+    linked_domains: list[str] = [] # off-site targets: refused, sent back from, or the hop target
+    hops: list[NavigationHop] = []  # the one followed cross-domain link, with its source page (2026-10-07)
 
 class OutputRecord(BaseModel):
     url: str                       # exactly as given in data/urls.txt
@@ -1032,6 +1034,7 @@ snapshot ─► patterns.py   finds candidates in: visible text, attributes, scr
 - **`click_at` (decided 2026-10-06).** Refused on deposit pages: the policy cannot read what is drawn at a coordinate, and "I have paid" must never be clicked. Elsewhere a point inside a listed element gets that element's click rules.
 - **Typing (decided 2026-10-06).** Placeholders only from the identity (`email, password, username, first_name, last_name, phone`). A literal is at most 40 characters and is refused if it contains `@`, looks like a long number (card or phone), or is a phrase of 6+ words. Password fields take only `{identity.password}`, and that placeholder goes only into a password field. Fields for seed phrases or private keys, and card or bank fields, are never filled. Identity-document fields are never filled, and an **identity-document upload** (a file input or "upload ID/passport/selfie" control) is refused with `blocked_at: kyc`. No file input is ever used.
 - **Links (decided 2026-10-06).** Links and `goto` may go anywhere on the same registrable domain (eTLD+1, subdomains included). A click on a link whose `href` is on another registrable domain is refused, like `goto`. A click that still ends on another site (script navigation) is undone with `back` and counts as a failed step. Every refused or undone target URL is recorded in `linked_domains` (trace and output): where a scam site sends people (Telegram, other domains) is evidence.
+- **One cross-domain hop (decided 2026-10-07, supersedes "refused like `goto`" above for one link).** Many kits keep the marketing site and the app on different registrable domains (pilot site 027: login on `app.neurochain.uk`), so the agent may follow **one** such link if all of these hold: (a) the link text matches login / sign in / register / sign up / app / trade (not download or install); (b) it is the first and only hop, after which the agent is locked to the landing domain of the new site (no second hop, no way back to the old domain); (c) the target is not a major platform (social networks, messengers, app stores: `PLATFORM_DOMAINS` in `policy.py`) and not a real brand's own site (`classify.domain.real_brand_domain`: the first label equals a brand's own name in `brands.yaml`); (d) **the operator confirms it** with the same prompt mechanism as `--confirm-submit` (a run without a confirmation callback refuses every hop, and a "no" refuses that hop and the run continues). The hop is a `goto` of the link's URL in the same tab (a new-tab link would be closed as a popup); if it lands on another domain than the link's, it is undone. Platform links and every other refused link are recorded in `linked_domains` and never followed. The trace and output record the hop (`hops`: step, source page, link text, landing URL, domain) and the target is also listed in `linked_domains` (the app domain is reported as linked). Addresses found there belong to the original URL's record; their sightings carry the app domain's page URL.
 - **CAPTCHA (decided 2026-10-06, §7).** Widgets are detected in code from known iframes and selectors (reCAPTCHA anchor/bframe, Turnstile, hCaptcha, GeeTest and slider kits) plus challenge wording. One click on a checkbox-style widget (reCAPTCHA checkbox, Turnstile) is allowed per site. A second click, any other kind (hCaptcha, slider), or anything while a challenge is showing (images, audio, slider) is refused with `blocked_at: captcha`, and CAPTCHA fields are never filled.
 - **Refusals are logged.** Every refused action is an `AgentStep` with `allowed=false` and the policy's reason. The trace summary counts refusals per rule, so `click_at` on deposit pages and payment-claim clicks can be tallied.
 - **Several calls in one reply (decided 2026-10-06).** A reply may carry several `fill`/`select` calls followed by at most one other action (typically the submit click). Each is policy-checked on its own, in order; the batch stops at the first refusal or failure. A *step* is one model reply.

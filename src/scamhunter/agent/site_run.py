@@ -29,6 +29,7 @@ from scamhunter.agent.loop import (
 from scamhunter.agent.policy import Policy, registrable
 from scamhunter.agent.prompts import GOAL, system_prompt
 from scamhunter.browser.sandbox import new_context
+from scamhunter.classify.domain import BrandToken
 from scamhunter.config import Settings
 from scamhunter.llm.client import PRICES_PER_MTOK, LLMClient, TokenUsage
 from scamhunter.models import Classification, Identity, Site, TriageResult, Verdict
@@ -121,6 +122,7 @@ async def navigate_site(
     mobile: bool,
     opts: NavigationOptions,
     factory: MailboxFactory,
+    brands: list[BrandToken] | None = None,
 ) -> tuple[AgentRun | None, list[str], str | None]:
     """Run the navigation loop on one site. Returns the run (None if it could not start), notes
     for the site record and the identity id used. Evidence goes to the site's snapshots.jsonl."""
@@ -150,7 +152,7 @@ async def navigate_site(
         domain = registrable(host)
         if domain != site.registrable_domain:
             notes.append(f"navigation runs on {domain} (the site redirected from {site.host})")
-        policy = Policy(domain, identity, mock_wallet_active=False)  # no mock wallet in v1
+        policy = Policy(domain, identity, mock_wallet_active=False, brands=brands)  # no wallet v1
         decider = (
             opts.decider_factory(policy, site)
             if opts.decider_factory

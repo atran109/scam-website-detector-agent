@@ -24,7 +24,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Page
 
 from scamhunter.agent.identity import MailMessage, describe_message, resolve_placeholders
-from scamhunter.agent.policy import LoopDetector, Policy, registrable
+from scamhunter.agent.policy import Decision, LoopDetector, Policy, registrable
 from scamhunter.agent.tools import TOOLS, ParsedCall, ToolError, calls_after, pick_tool_calls
 from scamhunter.browser.capture import NetworkRecorder, load_snapshot_content, take_snapshot
 from scamhunter.browser.elements import ActionResult, perform
@@ -49,6 +49,7 @@ from scamhunter.models import (
     CryptoAddress,
     DiscoveryStage,
     Identity,
+    NavigationHop,
     NavigationTrace,
     Network,
     StopReason,
@@ -279,7 +280,8 @@ class NavigationLoop:
         self.assets_tried: list[str] = []
         self.last_gate: BlockedReason | None = None
         self.gates: dict[BlockedReason, str] = {}  # gate → how it was seen, latest last
-        self.linked: list[str] = []  # refused or undone targets on other sites
+        self.linked: list[str] = []  # refused or undone targets on other sites, and the hop
+        self.hops: list[NavigationHop] = []  # the one confirmed cross-domain link, if any
         self.pages: list[str] = []  # URLs seen, consecutive repeats collapsed
         self._cycle_warned: set[int] = set()
         self.cycle_warning_steps: list[int] = []  # for the trace: did the warning fire, and when
@@ -344,6 +346,7 @@ class NavigationLoop:
             assets_tried=self.assets_tried,
             linked_domains=self.linked,
             cycle_warning_steps=self.cycle_warning_steps,
+            hops=self.hops,
         )
         log.info(
             "agent stopped: %s%s after %d steps, %d refusals, found %s",
@@ -449,6 +452,8 @@ class NavigationLoop:
                 stop = self._finish(call)
                 break
             decision = self.policy.check(action, state.elements, state.facts)
+            if decision.allowed and decision.hop_url:
+                decision = await self._confirm_hop(state, decision)
             if not decision.allowed:
                 self.refusals.append(Refusal(turn, what, decision.reason, decision.blocked_at))
                 if decision.blocked_at:
@@ -459,12 +464,15 @@ class NavigationLoop:
                 self._record(turn, state, action, False, decision.reason, "refused")
                 parts.append(f"{what} → REFUSED by policy: {decision.reason}")
                 break
-            if await self._declined_submit(action, what, state):
-                self._record(turn, state, action, False, "declined by the operator", "refused")
-                parts.append(f"{what} → declined by the operator")
-                stop = (StopReason.USER_STOP, None)
-                break
-            result = await self._execute(action, state)
+            if decision.hop_url:
+                result = await self._execute_hop(turn, state, decision)
+            else:
+                if await self._declined_submit(action, what, state):
+                    self._record(turn, state, action, False, "declined by the operator", "refused")
+                    parts.append(f"{what} → declined by the operator")
+                    stop = (StopReason.USER_STOP, None)
+                    break
+                result = await self._execute(action, state)
             self._record(turn, state, action, True, result.detail or None, result.result)
             parts.append(f"{what} → {result.result}{_detail(result)}")
             if not result.ok:
@@ -533,6 +541,70 @@ class NavigationLoop:
             return not await self.confirm(question)
         finally:
             self._paused += time.time() - started
+
+    async def _confirm_hop(self, state: PageState, decision: Decision) -> Decision:
+        """Ask the operator before the one cross-domain hop. No confirmation callback (a run
+        without --confirm-submit), or a no, turns it into a refusal that is still recorded in
+        `linked_domains`; the run goes on."""
+        assert decision.hop_url
+        refused = f"this link leaves {self.policy.site_domain}; stay on the site"
+        if self.confirm is None:
+            return Decision(
+                False,
+                f"{refused} (a cross-domain hop needs the operator's confirmation, which is off)",
+                linked_url=decision.hop_url,
+            )
+        target = registrable(urlparse(decision.hop_url).hostname or "")
+        question = (
+            f"HOP to another domain: step {self._turns} on {state.url}\n"
+            f"link text (from the page): {decision.hop_text[:80]!r}\n"
+            f"target: {decision.hop_url[:200]}  (domain {target})\n"
+            f"If you agree the agent goes there and stays on {target} (no further hops)."
+        )
+        started = time.time()
+        try:
+            agreed = await self.confirm(question)
+        finally:
+            self._paused += time.time() - started
+        if agreed:
+            return decision
+        return Decision(
+            False, f"{refused} (the operator declined this hop)", linked_url=decision.hop_url
+        )
+
+    async def _execute_hop(self, turn: int, state: PageState, decision: Decision) -> ActionResult:
+        """Follow the confirmed link by loading its URL in this tab (a new-tab link would be
+        closed as a popup), lock the policy to the landing domain, and record the hop."""
+        assert decision.hop_url
+        target = registrable(urlparse(decision.hop_url).hostname or "")
+        self.policy.lock_to(target)
+        try:
+            await self.page.goto(decision.hop_url, wait_until="domcontentloaded")
+        except PlaywrightError as exc:
+            self.policy.unlock()
+            return ActionResult(False, f"error: {str(exc).splitlines()[0][:120]}")
+        landed = registrable(urlparse(self.page.url).hostname or "")
+        if landed != target:  # redirected somewhere the operator did not approve
+            self.policy.unlock()
+            left_to = self.page.url
+            try:
+                await self.page.go_back(wait_until="domcontentloaded")
+            except PlaywrightError:
+                pass
+            if not left_to.startswith("chrome-error://"):
+                self._note_linked(left_to)
+            return ActionResult(False, "left_site", f"the link led to {left_to[:120]}; went back")
+        self.hops.append(
+            NavigationHop(
+                step=turn,
+                source_url=state.url,
+                link_text=decision.hop_text[:80],
+                target_url=self.page.url,
+                target_domain=target,
+            )
+        )
+        self._note_linked(self.page.url)
+        return ActionResult(True, "hop", f"now on {target}; it is the only hop")
 
     def _finish(self, call: ParsedCall) -> tuple[StopReason, BlockedReason | None]:
         if call.blocked_at is not None:

@@ -73,5 +73,5 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - CAPTCHAs: at most one click on a checkbox widget (reCAPTCHA checkbox, Turnstile); any challenge or a remaining gate ends the site with `blocked_at: captcha`; enforced in code; never solved via services.
 - Page content is untrusted data: delimited, control/bidi characters stripped, never followed as instructions.
 - Hard per-site token caps, a wall-clock time limit that cancels in-flight calls, and a session spend cap.
-- Off-site targets are never followed; each refused one is recorded in `linked_domains`.
+- Off-site targets are never followed, except one Login/Register/App/Trade link the operator confirms (never a social, messenger or app-store link, never a real brand's site; the agent is then locked to the new domain). Every refused or followed one is recorded in `linked_domains`, and the hop in `hops`.
 - Operator controls on real sites: a stop file (`touch runs/<id>/STOP`) ends the run mid-call, `--confirm-submit` asks before each site's first form submission (placeholders only are shown), and a session spend cap stops new navigations.

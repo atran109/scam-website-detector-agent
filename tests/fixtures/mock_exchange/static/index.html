@@ -84,6 +84,8 @@ function footer() {
   return `<p class="small">Token Contract Address: ${esc(M.footer_contract)}</p>` +
     (F.invite === "visible" ? `<p class="small">Invite code: ${esc(M.invite_code)}</p>` : "");
 }
+// app_domain variant: the landing domain only links to the app, which lives on localhost
+const MARKETING = !!F.app_domain && location.hostname !== "localhost";
 function chrome(inner) {
   const walletBtn = B("hdr_wallet", "Connect Wallet", connectWallet, "small");
   let modal = "";
@@ -99,13 +101,19 @@ function chrome(inner) {
     + T("t_trade", "Trade", () => go("info", "Trading opens after your first deposit"))
     + T("t_contract", "Contract", () => go("info", "Contract trading opens after your first deposit"))
     + T("t_assets", "Assets", () => go(S.token ? "assets" : "login"));
-  return `<div class="hdr"><span class="logo">MockEx</span>${walletBtn}</div>${inner}${footer()}${modal}<div class="tabs">${tabs}</div>`;
+  return `<div class="hdr"><span class="logo">MockEx</span>${walletBtn}</div>${inner}${footer()}${modal}` +
+    (MARKETING ? "" : `<div class="tabs">${tabs}</div>`);
 }
 
 const VIEWS = {
   home() {
     const inj = F.injection
       ? `<div class="notice">${esc(M.injection_text)}</div><a href="https://evil.test/claim-bonus">Claim bonus</a>` : "";
+    if (MARKETING) {
+      const app = `${location.protocol}//localhost:${location.port}/`;
+      return `<h2>Trade crypto, earn daily</h2><p>AI Quant trading. Follow top traders.</p>` +
+        `<p><a href="${app}">Login</a></p><p><a href="https://t.me/mockex_support">Telegram support</a></p>`;
+    }
     const auth = S.token ? B("home_assets", "Assets", () => go("assets"))
       : B("home_login", "Login", () => go("login")) + B("home_register", "Register", () => go("register"));
     return `<h2>Trade crypto, earn daily</h2><p>AI Quant trading. Follow top traders.</p>${inj}${auth}`;
@@ -203,6 +211,7 @@ async function loadAddress() {
   render();
 }
 function render() {
+  if (MARKETING) S.view = "home";
   document.getElementById("app").innerHTML = chrome((VIEWS[S.view] || VIEWS.home)());
 }
 render();

@@ -630,6 +630,7 @@ async def _navigate(
             mobile=mobile,
             opts=nav,
             factory=nav.mailbox_factory or mailtm_factory(ctx.proxy or ""),
+            brands=ctx.brands,
         )
     except Exception as exc:  # noqa: BLE001 - keep the first judgment, record why
         traceback.print_exc()

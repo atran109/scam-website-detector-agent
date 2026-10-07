@@ -366,6 +366,16 @@ class AgentStep(BaseModel):
     elapsed_ms: int
 
 
+class NavigationHop(BaseModel):
+    """The one cross-domain link the operator let the agent follow (DESIGN §5.5, 2026-10-07)."""
+
+    step: int
+    source_url: str  # the page the link was on
+    link_text: str  # as shown on the page (page-controlled text)
+    target_url: str  # where the browser landed
+    target_domain: str  # registrable domain the agent is locked to from then on
+
+
 class NavigationTrace(BaseModel):
     goal: str
     steps: list[AgentStep]
@@ -377,6 +387,7 @@ class NavigationTrace(BaseModel):
     assets_tried: list[str]  # coins/networks selected on deposit page
     linked_domains: list[str] = []  # refused or undone target URLs on other sites
     cycle_warning_steps: list[int] = []  # steps where the page-cycle warning was shown to the model
+    hops: list[NavigationHop] = []  # cross-domain links followed (at most one)
 
 
 # ---------- Result ----------
@@ -444,7 +455,8 @@ class NavigationSummary(OutputModel):
     steps: int = Field(ge=0)
     stop_reason: StopReason
     blocked_at: BlockedReason | None
-    linked_domains: list[str] = []  # off-site targets the agent was refused or sent back from
+    linked_domains: list[str] = []  # off-site targets: refused, sent back from, or the hop target
+    hops: list[NavigationHop] = []  # the one followed cross-domain link, with its source page
 
 
 class OutputRecord(OutputModel):

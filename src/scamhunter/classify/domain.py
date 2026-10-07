@@ -86,6 +86,17 @@ def _token(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def real_brand_domain(registrable_domain: str, brands: list[BrandToken]) -> str | None:
+    """The brand whose real site this registrable domain may be: the first label is exactly the
+    brand's own name ("binance.com", "coinbase.org"), the same test `brand_signal` uses for
+    "maybe the real site". The agent never hops to such a domain."""
+    label = registrable_domain.split(".")[0]
+    for brand in brands:
+        if brand.own_name and label == brand.token:
+            return brand.brand
+    return None
+
+
 def load_brands(path: Path = REPO_ROOT / "config" / "brands.yaml") -> list[BrandToken]:
     """Entries are "Name/alias" strings or mappings {name, tokens, match, fuzzy, all_words}.
     `all_words` adds one more token that matches when every listed word starts or ends a
