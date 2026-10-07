@@ -517,9 +517,10 @@ class NavigationLoop:
         if element is not None and element.role in NOT_A_SUBMIT_ROLES:
             return False  # ticking "I agree" submits nothing; ask at the button
         self._submit_confirmed = True
-        shot = (
-            self.evidence.site_dir / "snapshots" / f"a{self.evidence._count:03d}" / "screenshot.png"
-        )
+        shot_dir = self.evidence.site_dir / "snapshots" / f"a{self.evidence._count:03d}"
+        # as seen from the repo on the host (the container mounts runs/ at /app/runs)
+        shot = Path("runs") / self.evidence.run_dir.name
+        shot /= (shot_dir / "screenshot.png").relative_to(self.evidence.run_dir)
         question = (
             f"step {self._turns} on {state.url}\nabout to run: {what}\n"
             "typed so far this site (placeholders, never the real values):\n"
