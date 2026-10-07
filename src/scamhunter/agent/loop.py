@@ -35,6 +35,7 @@ from scamhunter.agent.policy import Decision, LoopDetector, Policy, registrable
 from scamhunter.agent.tools import TOOLS, ParsedCall, ToolError, calls_after, pick_tool_calls
 from scamhunter.browser.capture import NetworkRecorder, load_snapshot_content, take_snapshot
 from scamhunter.browser.elements import ActionResult, perform
+from scamhunter.browser.nav_guard import PageNavigationGuard
 from scamhunter.browser.page_state import (
     Coverage,
     PageState,
@@ -273,6 +274,7 @@ class NavigationLoop:
         stop_file: Path | None = None,
         confirm: Confirm | None = None,
         progress: Callable[[str], None] | None = None,
+        page_guard: PageNavigationGuard | None = None,
     ) -> None:
         self.page = page
         self.decider = decider
@@ -315,6 +317,7 @@ class NavigationLoop:
         # Operator controls (real-site runs). The stop file ends the run at once; `confirm` is
         # asked before the first submit-type action that follows a fill, and the time spent
         # waiting for the operator does not count against the wall-clock budget.
+        self.page_guard = page_guard  # in-page cancel of off-site navigations (first line)
         self.stop_file = stop_file
         self.confirm = confirm
         self.progress = progress
@@ -333,6 +336,8 @@ class NavigationLoop:
     async def run(self) -> AgentRun:
         self._started = time.time()
         context = self.page.context
+        if self.page_guard is not None:
+            await self.page_guard.install(self.policy.site_domain)
         await context.route("**/*", self._navigation_guard)
         try:
             return await self._run()
@@ -641,6 +646,10 @@ class NavigationLoop:
             notes.append(f"same page as step {first}, now seen {times + 1} times")
         return "; ".join(notes)
 
+    async def _restore_guard(self) -> None:
+        if self.page_guard is not None:
+            await self.page_guard.set_allowed(self.policy.site_domain)
+
     async def _confirm_hop(self, state: PageState, decision: Decision) -> Decision:
         """Ask the operator before the one cross-domain hop. No confirmation callback (a run
         without --confirm-submit), or a no, turns it into a refusal that is still recorded in
@@ -677,14 +686,18 @@ class NavigationLoop:
         assert decision.hop_url
         target = registrable(urlparse(decision.hop_url).hostname or "")
         self.policy.lock_to(target)
+        if self.page_guard is not None:
+            await self.page_guard.set_allowed(target)  # before the load: its documents are new
         try:
             await self.page.goto(decision.hop_url, wait_until="domcontentloaded")
         except PlaywrightError as exc:
             self.policy.unlock()
+            await self._restore_guard()
             return ActionResult(False, f"error: {str(exc).splitlines()[0][:120]}")
         landed = registrable(urlparse(self.page.url).hostname or "")
         if landed != target:  # redirected somewhere the operator did not approve
             self.policy.unlock()
+            await self._restore_guard()
             left_to = self.page.url
             try:
                 await self.page.go_back(wait_until="domcontentloaded")
@@ -723,6 +736,7 @@ class NavigationLoop:
             )
         blocked_before = len(self.blocked_navigations)
         result = await perform(self.page, action, state.elements)
+        await self._collect_cancelled()
         if len(self.blocked_navigations) > blocked_before:
             self._blocked_reported = len(self.blocked_navigations)
             url = self.blocked_navigations[-1]
@@ -755,6 +769,15 @@ class NavigationLoop:
                 await self.page.wait_for_timeout(MAILBOX_POLL_SECONDS * 1000)
         return ActionResult(True, "no_mail", "the mailbox has no new message")
 
+    async def _collect_cancelled(self) -> None:
+        """Off-site navigations the page guard cancelled inside the page (no connection made)."""
+        if self.page_guard is None:
+            return
+        for url in await self.page_guard.drain():
+            self.blocked_navigations.append(url)
+            self._note_linked(url)
+            log.info("page guard cancelled %s", url[:200])
+
     async def _back_if_off_site(self) -> None:
         """Backup for the guard: if a stopped navigation still left an error page, go back."""
         if not self._on_site():
@@ -782,6 +805,7 @@ class NavigationLoop:
             steps_left=self.limits.max_steps - turn + 1,
             seconds_left=max(0, int(self.limits.max_seconds - self._elapsed())),
         )
+        await self._collect_cancelled()
         if len(self.blocked_navigations) > self._blocked_reported:
             await self._back_if_off_site()  # before observing, so the agent sees the real page
         state = await observe(self.page, stage, coverage)

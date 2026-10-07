@@ -134,10 +134,10 @@ Adjust the hours to the real schedule.
 ### M5. Full hardening
 
 - [ ] Container: read-only root filesystem (`cap_drop`, `no-new-privileges` and limits already done in M1)
-- [ ] Stop the connection to off-site navigation targets (LOG 2026-10-07 13:40 and the preconnect experiment): cancel off-site navigations inside the page with the Navigation API (`navigate` event, init script), which opened no tunnel in the probe, with the allowed domain updated after a confirmed hop; keep the route guard and `back` as backups; server-side redirects and `window.open` need their own handling
+- [x] Stop the connection to off-site navigation targets (LOG 2026-10-07 15:10): `browser/nav_guard.py` cancels off-site script navigations and `window.open` inside the page (Navigation API, registered through CDP so the allowed domain follows a confirmed hop); selftest proves no tunnel opens; the route guard and `back` stay as backups. Not covered: server-side redirects
 - [ ] Re-run `make selftest`; review `egress.log` for anything unexpected
-- [ ] Replace the nip.io DNS-rebinding probe with a DNS-independent test (a local resolver that returns a link-local IP for a test name; assert the proxy refuses it); an inconclusive result must fail closed for real-site runs (moved here from "must do before step F", LOG 2026-10-06 21:06)
-- [ ] Verify the Chromium sandbox is on inside the container (no silent `--no-sandbox`)
+- [x] Replace the nip.io DNS-rebinding probe with a DNS-independent test (a local resolver that returns a link-local IP for a test name; assert the proxy refuses it); an inconclusive result must fail closed for real-site runs (moved here from "must do before step F", LOG 2026-10-06 21:06)
+- [x] Verify the Chromium sandbox is on inside the container (no silent `--no-sandbox`): selftest checks the flag and the renderer's seccomp filter and user namespace
 - [ ] Browser: block non-http(s) schemes and service workers; close popups; no extensions
 - [ ] LLM: page content wrapped as untrusted data; structured outputs validated
 - [ ] Per-site timeouts at every level; bounded concurrency; retries with backoff

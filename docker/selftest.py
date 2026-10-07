@@ -21,6 +21,7 @@ from pathlib import Path
 import httpx
 from playwright.async_api import async_playwright
 
+from scamhunter.browser.nav_guard import PageNavigationGuard
 from scamhunter.browser.sandbox import launch_browser, launch_mock_browser, new_context
 from scamhunter.config import (
     SandboxError,
@@ -32,6 +33,17 @@ from scamhunter.config import (
 
 ALLOWED_URL = "https://example.com/"
 ALLOWED_HOST = "example.com"
+
+# Names the proxy resolves through its own /etc/hosts (docker-compose `extra_hosts`) to an address
+# it must never connect to. DNS-independent: no resolver, filtered or not, is involved, so the only
+# acceptable answer is the proxy's own refusal (403 ERR_ACCESS_DENIED); "could not resolve" means
+# the probe did not run and counts as a failure (fail closed). Replaces the nip.io probe.
+REBIND_URLS = [
+    "http://rebind-linklocal.selftest.test/",
+    "http://rebind-private.selftest.test/",
+    "http://rebind-loopback.selftest.test/",
+    "https://rebind-linklocal.selftest.test/",  # the CONNECT path
+]
 
 
 @dataclass
@@ -58,9 +70,9 @@ def denied_targets() -> list[str]:
         "http://127.0.0.1/",
         "http://egress-proxy:3128/squid-internal-mgr/info",  # the proxy's own manager
         "http://localtest.me/",  # public name resolving to 127.0.0.1
-        "http://169.254.169.254.nip.io/",  # public name resolving to the metadata IP
         "https://169.254.169.254/",  # CONNECT path, not just plain http
         "http://example.com:8080/",  # non-allowed port
+        *REBIND_URLS,
     ]
     if router := os.environ.get("SELFTEST_ROUTER_IP"):
         targets.insert(0, f"http://{router}/")  # home router, from the Mac's default route
@@ -166,8 +178,9 @@ async def check_proxy(proxy: str) -> None:
         for url in denied_targets():
             status, squid_error = await proxy_outcome(client, url)
             blocked = status == 403 and (squid_error or "").startswith("ERR_ACCESS_DENIED")
-            # A name the proxy can't resolve never gets a connection either.
-            unresolvable = (squid_error or "").startswith("ERR_DNS_FAIL")
+            # A name the proxy can't resolve never gets a connection either, except the rebinding
+            # probes, which exist to prove the refusal itself.
+            unresolvable = url not in REBIND_URLS and (squid_error or "").startswith("ERR_DNS_FAIL")
             record(
                 f"proxy denies {url}",
                 blocked or unresolvable,
@@ -233,10 +246,15 @@ async def check_browser(proxy: str) -> None:
                 squid = response.headers.get("x-squid-error", "") if response else ""
                 ok = response is not None and response.status == 403
                 ok = ok and squid.startswith("ERR_ACCESS_DENIED")
-                ok = ok or squid.startswith("ERR_DNS_FAIL")
+                if url not in REBIND_URLS:
+                    ok = ok or squid.startswith("ERR_DNS_FAIL")
                 detail = f"status={response.status if response else None} squid={squid}"
             except Exception as exc:  # navigation error = not reached
-                ok, detail = True, f"navigation failed: {str(exc).splitlines()[0]}"
+                # A rebinding probe must end in the proxy's own refusal (a 403 page for http, a
+                # failed tunnel for https); a DNS error there means the probe did not run.
+                dns_error = "ERR_NAME_NOT_RESOLVED" in str(exc)
+                ok = not (url in REBIND_URLS and dns_error)
+                detail = f"navigation failed: {str(exc).splitlines()[0]}"
             record(f"chromium denied {url}", ok, detail)
             await page.close()
 
@@ -261,6 +279,50 @@ async def check_browser(proxy: str) -> None:
 
         await context.close()
         await browser.close()
+
+
+# ---------- 4b. The in-page navigation guard opens no connection ----------
+
+
+async def check_page_guard(proxy: str, run_id: str) -> None:
+    """A page that sends the browser to another site by itself: with the guard the navigation is
+    cancelled in the page and the proxy logs no tunnel to the target; the same navigation without
+    the guard does open one (the control, which also proves the log shows tunnels). The route
+    layer alone does not pass this (LOG 2026-10-07, preconnect experiment)."""
+    log = Path("/app/runs") / run_id / "egress.log"
+    before = len(log.read_text()) if log.exists() else 0
+    guarded_host, control_host = "example.net", "example.org"
+    settings = load_settings()
+    outcome: dict[str, tuple[str, list[str]]] = {}
+    async with async_playwright() as pw:
+        browser = await launch_browser(pw, proxy)
+        for host, guarded in ((guarded_host, True), (control_host, False)):
+            context = await new_context(browser, settings.browser)
+            page = await context.new_page()
+            await page.goto(ALLOWED_URL, timeout=30000)
+            guard = PageNavigationGuard(page)
+            if guarded:
+                await guard.install(ALLOWED_HOST)
+            await page.evaluate(f"setTimeout(() => {{ location.href = 'https://{host}/'; }}, 100)")
+            await page.wait_for_timeout(3500)
+            outcome[host] = (page.url, await guard.drain() if guarded else [])
+            await context.close()
+        await browser.close()
+    new = ""
+    for _ in range(12):  # Squid logs a tunnel when it closes
+        new = log.read_text()[before:] if log.exists() else ""
+        if f"CONNECT {control_host}:443" in new:
+            break
+        time.sleep(1)
+    control_seen = f"CONNECT {control_host}:443" in new
+    guarded_seen = f"CONNECT {guarded_host}:443" in new
+    url, cancelled = outcome[guarded_host]
+    record(
+        "in-page guard opens no connection to an off-site target",
+        control_seen and not guarded_seen and url.startswith(ALLOWED_URL) and bool(cancelled),
+        f"guarded: tunnel={guarded_seen} cancelled={cancelled} stayed={url}; "
+        f"control (no guard): tunnel={control_seen}",
+    )
 
 
 # ---------- 6. Mock mode stays on loopback ----------
@@ -443,6 +505,7 @@ async def main() -> int:
     check_direct_egress()
     await check_proxy(proxy)
     await check_browser(proxy)
+    await check_page_guard(proxy, run_id)
     check_egress_log(run_id)
 
     failed = [c for c in checks if not c.passed]

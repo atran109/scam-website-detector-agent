@@ -68,7 +68,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 
 ## Safety
 - Crawler in hardened Docker (non-root, no capabilities, seccomp, Chromium sandbox on, downloads off), internal network only; egress via Squid that denies private/link-local/loopback by resolved IP and logs every request.
-- `make selftest` must pass before any real visit (41 checks); real-site runs fail to start if any check fails. A mock-only waiver exists for one DNS-filtered network; the DNS-independent rebinding probe is an M5 hardening item.
+- `make selftest` must pass before any real visit (48 checks); real-site runs and mock runs fail to start if any check fails; there is no waiver. The DNS-rebinding probe uses names the proxy resolves from its own `/etc/hosts` to link-local, private and loopback addresses, so it does not depend on the network's DNS, and "could not resolve" counts as a failure. A check also shows that the in-page navigation guard opens no connection to an off-site target while the same navigation without it does.
 - API key only in the gateway container; the crawler talks to the gateway, which talks only to api.anthropic.com.
 - Agent policy in code: never pay, sign, withdraw, claim a payment, upload receipts or IDs, connect a wallet (until a mock wallet exists), or leave the site; placeholders only for personal data (synthetic identity, 555 phone numbers).
 - CAPTCHAs: at most one click on a checkbox widget (reCAPTCHA checkbox, Turnstile); any challenge or a remaining gate ends the site with `blocked_at: captcha`; enforced in code; never solved via services.

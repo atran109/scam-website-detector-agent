@@ -28,6 +28,7 @@ from scamhunter.agent.loop import (
 )
 from scamhunter.agent.policy import Policy, registrable
 from scamhunter.agent.prompts import GOAL, system_prompt
+from scamhunter.browser.nav_guard import PageNavigationGuard
 from scamhunter.browser.sandbox import new_context
 from scamhunter.classify.domain import BrandToken
 from scamhunter.config import Settings
@@ -174,6 +175,7 @@ async def navigate_site(
             stop_file=opts.stop_file,
             confirm=opts.confirm,
             progress=(lambda line: progress(f"{site_id} {line}")) if progress else None,
+            page_guard=PageNavigationGuard(page),
         )
         run = await loop.run()
         (site_dir / "agent_trace.json").write_text(run.trace.model_dump_json(indent=2))

@@ -5,6 +5,10 @@ services:
   egress-proxy:
     build: docker/egress-proxy
     networks: [internal, egress]
+    extra_hosts:                                  # DNS-independent rebinding probe (selftest):
+      - "rebind-linklocal.selftest.test:169.254.169.254"   # names that resolve, in the proxy's
+      - "rebind-private.selftest.test:192.168.0.1"         # /etc/hosts, to addresses it must
+      - "rebind-loopback.selftest.test:127.0.0.1"          # never connect to
     volumes:
       - ./runs/${RUN_ID:-adhoc}:/var/log/squid    # egress.log lands in the run directory
     cap_drop: [ALL]

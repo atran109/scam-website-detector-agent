@@ -28,6 +28,7 @@ from scamhunter.agent.loop import (
 )
 from scamhunter.agent.policy import Policy, registrable
 from scamhunter.agent.site_run import NavigationOptions, Spend
+from scamhunter.browser.nav_guard import PageNavigationGuard
 from scamhunter.browser.sandbox import launch_mock_browser, new_context
 from scamhunter.config import REPO_ROOT, Settings, load_settings, require_loopback_url
 from scamhunter.extract.blocklist import load_blocklist
@@ -214,6 +215,7 @@ async def run_on_mock(
                 goal=goal,
                 identity=identity,
                 mailbox=MockMailbox(exchange, identity.email),
+                page_guard=PageNavigationGuard(page),
                 **({"confirm": auto_confirm} | (loop_kwargs or {})),
             )
             run = await loop.run()

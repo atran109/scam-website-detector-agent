@@ -56,32 +56,20 @@ capture: selftest
 
 # M3 step E: Claude (via the gateway) drives the local mock exchange. Mock mode: the browser
 # reaches loopback only. Gated on selftest, which proves that. Spend cap: --spend-cap (USD).
-# SELFTEST_WAIVER=rebind-probe (decided 2026-10-06, mock only): accept a selftest whose ONLY
-# failures are the nip.io DNS-rebinding probe (docker/selftest_waiver.py). Real-site targets
-# (triage, run) never read it and keep the full selftest gate.
-SELFTEST_WAIVER ?=
+# No waiver: the rebinding probe no longer depends on the network's DNS (LOG 2026-10-07), so mock
+# runs and real runs use the same full selftest gate.
 agent-mock: build
 	@mkdir -p runs/$(RUN_ID)
 	$(COMPOSE) up -d --force-recreate --wait egress-proxy llm-gateway
-ifeq ($(SELFTEST_WAIVER),rebind-probe)
-	-$(COMPOSE) run --rm crawler python docker/selftest.py
-	$(BIN)/python docker/selftest_waiver.py runs/$(RUN_ID)/selftest.json
-else
 	$(COMPOSE) run --rm crawler python docker/selftest.py
-endif
 	$(COMPOSE) run --rm crawler scamhunter agent-mock --run-id $(RUN_ID) $(ARGS)
 
 # The 10 mock variants through process_site (capture, judge, navigator, judge, build_result):
-# the real-site path against the loopback-only mock. Same selftest gate and waiver as agent-mock.
+# the real-site path against the loopback-only mock. Same selftest gate as agent-mock.
 pipeline-mock: build
 	@mkdir -p runs/$(RUN_ID)
 	$(COMPOSE) up -d --force-recreate --wait egress-proxy llm-gateway
-ifeq ($(SELFTEST_WAIVER),rebind-probe)
-	-$(COMPOSE) run --rm crawler python docker/selftest.py
-	$(BIN)/python docker/selftest_waiver.py runs/$(RUN_ID)/selftest.json
-else
 	$(COMPOSE) run --rm crawler python docker/selftest.py
-endif
 	$(COMPOSE) run --rm crawler scamhunter pipeline-mock --run-id $(RUN_ID) $(ARGS)
 
 # Watched real-site pilot (LOG 2026-10-07): Sonnet 5.5 navigator and judge, 30 steps, 300 s per
