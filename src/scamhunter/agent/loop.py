@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Page, Route
 
+from scamhunter.agent.coverage import CoverageTracker, coin_and_network, family_of
 from scamhunter.agent.identity import (
     MailMessage,
     describe_message,
@@ -47,7 +48,6 @@ from scamhunter.llm.client import LLMClient, LLMError, TokenUsage
 from scamhunter.llm.sanitize import untrusted
 from scamhunter.models import (
     ActionType,
-    AddressFormat,
     AddressTier,
     AgentAction,
     AgentStep,
@@ -164,34 +164,6 @@ class AgentRun:
     full_coverage_turn: int | None  # step at which every target asset had an address
     seconds: float  # wall clock
     call_usage: list[dict[str, int]] = field(default_factory=list)  # API usage per step
-
-
-# The coin and network a deposit-page control names ("USDT", "TRC20", "Tether (USDT - ERC20)",
-# "Ethereum (ETH)"). Used to know which asset an address was shown for.
-_COIN = re.compile(
-    r"(?<![A-Za-z])(USDT|USDC|BTC|ETH|TRX|BNB)(?![A-Za-z])|\b(Bitcoin|Ethereum|Tron)\b"
-)
-_NETWORK = re.compile(r"(?<![A-Za-z])(TRC-?20|ERC-?20|BEP-?20|BSC|OMNI)(?![A-Za-z0-9])", re.I)
-_COIN_NAMES = {"BITCOIN": "BTC", "ETHEREUM": "ETH", "TRON": "TRX"}
-
-
-def coin_and_network(label: str) -> tuple[str | None, str | None]:
-    coin = _COIN.search(label)
-    network = _NETWORK.search(label)
-    name = (coin.group(1) or _COIN_NAMES[coin.group(2).upper()]) if coin else None
-    net = network.group(1).upper().replace("-", "") if network else None
-    return name, net
-
-
-def evm_key_for_selection(coin: str | None, network: str | None) -> str | None:
-    """The EVM target asset an EVM address counts for, given the coin the agent had selected
-    when it appeared: ETH → ETH; USDT/USDC on ERC-20 (or no network named) → the ERC-20 target.
-    Another network (BEP-20, TRC-20) or another coin counts nothing."""
-    if coin == "ETH" and network in (None, "ERC20"):
-        return "ETH"
-    if coin in ("USDT", "USDC") and network in (None, "ERC20"):
-        return f"{coin}-ERC20"
-    return None
 
 
 def asset_keys(address: CryptoAddress) -> set[str]:
@@ -325,6 +297,7 @@ class NavigationLoop:
         self.pages: list[str] = []  # URLs seen, consecutive repeats collapsed
         self._cycle_warned: set[int] = set()
         self.cycle_warning_steps: list[int] = []  # for the trace: did the warning fire, and when
+        self.coverage = CoverageTracker(limits.target_assets)
         self.selected_coin: str | None = None  # last coin chosen on a deposit page (click/select)
         self.selected_network: str | None = None
         self.password_submitted = False
@@ -587,7 +560,7 @@ class NavigationLoop:
                 stage = DiscoveryStage.DEPOSIT_PAGE
             screenshot, new = await self.evidence.capture(stage)
             self._count_found(new, turn)
-            self._count_shared_evm(turn)
+            self._count_shared(turn)
             new_addresses = [a.address for a in new]
             for step in self.steps[recorded_from:]:
                 if step.allowed:
@@ -890,25 +863,24 @@ class NavigationLoop:
             elif network:
                 self.selected_network = network
 
-    def _count_shared_evm(self, turn: int) -> None:
-        """One EVM address often serves ETH and every ERC-20 token. Each time a deposit page
-        shows a primary EVM address in its text, the EVM asset the agent had selected counts as
-        found (2026-10-07: pilot site 012 showed one address for ETH, USDT and USDC, its labels
-        stayed at 0.4, so coverage never counted them and the agent kept cycling)."""
+    def _count_shared(self, turn: int) -> None:
+        """Coverage by selection and by sharing (`agent/coverage.py`): after a snapshot of a
+        deposit page, the primary addresses visible in its text count for the coin the agent had
+        selected, and an address shown for two selections counts for its whole family."""
         if self.evidence.last_stage != DiscoveryStage.DEPOSIT_PAGE:
             return
-        key = evm_key_for_selection(self.selected_coin, self.selected_network)
-        if key is None or key not in self.limits.target_assets:
-            return
         text = self.evidence.last_text.lower()
-        for address in self.evidence.last_found:
-            if address.tier != AddressTier.PRIMARY or address.format != AddressFormat.EVM:
-                continue
-            if address.address.lower() not in text:  # an attribute-only sighting is not "shown"
-                continue
-            if self.first_address_turn is None:
-                self.first_address_turn = turn
-            self.found.add(key)
+        shown = [
+            (family, a.address)
+            for a in self.evidence.last_found
+            if a.tier == AddressTier.PRIMARY
+            and (family := family_of(a.format)) is not None
+            and a.address.lower() in text  # an attribute-only sighting is not "shown"
+        ]
+        keys = self.coverage.observe(self.selected_coin, self.selected_network, shown)
+        if keys and self.first_address_turn is None:
+            self.first_address_turn = turn
+        self.found |= keys
         if self.full_coverage_turn is None and set(self.limits.target_assets) <= self.found:
             self.full_coverage_turn = turn
 

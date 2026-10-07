@@ -9,7 +9,9 @@ from scamhunter.config import DEFAULT_SETTINGS_PATH
 from scamhunter.models import RunSummary, SiteResult
 
 
-def summarize(results: Sequence[SiteResult], run_id: str) -> RunSummary:
+def summarize(
+    results: Sequence[SiteResult], run_id: str, gateway_usage: dict | None = None
+) -> RunSummary:
     addresses = [a for r in results for a in r.addresses + r.low_confidence_addresses]
     return RunSummary(
         run_id=run_id,
@@ -28,4 +30,5 @@ def summarize(results: Sequence[SiteResult], run_id: str) -> RunSummary:
         ),
         total_tokens_in=sum(r.cost.get("tokens_in", 0) for r in results),
         total_tokens_out=sum(r.cost.get("tokens_out", 0) for r in results),
+        gateway_usage=gateway_usage,
     )

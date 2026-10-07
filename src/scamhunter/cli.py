@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 
 from scamhunter.config import REPO_ROOT, Settings, load_settings
+from scamhunter.llm.usage_log import count_lines, read_usage
 from scamhunter.models import Site, SiteResult
 from scamhunter.pipeline import (
     PIPELINE_VERSION,
@@ -37,12 +38,17 @@ def _select(sites: list[Site], only: str | None) -> list[Site]:
     return [by_id[i] for i in wanted if i in by_id]  # the order given (the pilot's order)
 
 
-def _finalize(results: Sequence[SiteResult], settings: Settings, run_id: str) -> None:
+def _finalize(
+    results: Sequence[SiteResult],
+    settings: Settings,
+    run_id: str,
+    gateway_usage: dict | None = None,
+) -> None:
     """Cross-site pass, then results.json + screenshots + summary inside the run directory."""
     out = run_dir(run_id)
     final = apply_sibling_signals(list(results), settings)
     path = write_results(final, run_id, out, out / "output", PIPELINE_VERSION)
-    summary = summarize(final, run_id)
+    summary = summarize(final, run_id, gateway_usage)
     (out / "summary.json").write_text(summary.model_dump_json(indent=2))
     print(f"\n{path} ({len(final)} records)")
     print(
@@ -135,6 +141,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"stop everything with: touch runs/{run_id}/STOP",
             flush=True,
         )
+    usage_from = count_lines()
     try:
         results = asyncio.run(
             run_pipeline(settings, sites, out, resume=args.resume, nav=nav, concurrency=concurrency)
@@ -142,10 +149,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     except NoSitesVisited as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    usage = _report_gateway_usage(out, usage_from, {s.site_id for s in sites})
     if nav is not None:
-        print(f"estimated LLM spend this run: ${nav.spend.usd:.2f}")
-    _finalize(results, settings, run_id)
+        print(f"(the run's own running estimate, used for the spend cap: ${nav.spend.usd:.2f})")
+    _finalize(results, settings, run_id, usage.model_dump())
     return 0
+
+
+def _report_gateway_usage(out, start_line: int, site_ids: set[str]):
+    """What this invocation cost, from the gateway usage log (the figure to use for estimates;
+    `runs/<id>/usage.json`). Counts the log's new lines for this run's sites only."""
+    usage = read_usage(start_line=start_line, site_ids=site_ids)
+    (out / "usage.json").write_text(usage.model_dump_json(indent=2))
+    print(f"LLM cost this invocation (gateway usage log): {usage.line()}", flush=True)
+    return usage
 
 
 def cmd_capture(args: argparse.Namespace) -> int:
@@ -171,8 +188,10 @@ def cmd_capture(args: argparse.Namespace) -> int:
 def cmd_rescore(args: argparse.Namespace) -> int:
     settings = load_settings()
     sites = load_sites(URLS_PATH)
+    usage_from = count_lines()
     results = asyncio.run(rescore(settings, sites, run_dir(args.run_id)))
-    _finalize(results, settings, args.run_id)
+    usage = _report_gateway_usage(run_dir(args.run_id), usage_from, {s.site_id for s in sites})
+    _finalize(results, settings, args.run_id, usage.model_dump())
     return 0
 
 

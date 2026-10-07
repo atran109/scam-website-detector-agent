@@ -2,6 +2,7 @@
 The loop itself runs end to end in tests/browser/test_agent_mock_site.py."""
 
 from scamhunter.agent.loop import (
+    AgentLimits,
     AgentRun,
     ClaudeDecider,
     Refusal,
@@ -171,7 +172,10 @@ def test_gates_seen_are_in_the_step_message() -> None:
 def test_cycle_warning_is_shown_once_and_recorded_with_its_step() -> None:
     from scamhunter.agent.loop import NavigationLoop
 
-    loop = NavigationLoop(None, None, None, None, None, "goal")  # type: ignore[arg-type]
+    limits = AgentLimits(
+        max_steps=30, max_seconds=300, max_consecutive_failures=4, target_assets=("BTC",)
+    )
+    loop = NavigationLoop(None, None, None, limits, None, "goal")  # type: ignore[arg-type]
     cycle = ["/#/register", "/#/home", "/#/login"]
     loop.pages = ["/"] + cycle * 2
     assert not loop._page_cycle(7) and loop.cycle_warning_steps == []  # two repeats: quiet
@@ -182,22 +186,6 @@ def test_cycle_warning_is_shown_once_and_recorded_with_its_step() -> None:
     assert not loop._page_cycle(11) and loop.cycle_warning_steps == [10]  # only once per period
     loop.pages += cycle  # fourth repeat: stop
     assert loop._page_cycle(13)
-
-
-def test_a_shared_evm_address_counts_for_the_coin_selected_when_it_appeared() -> None:
-    """Pilot site 012's dropdown options and the mock's coin and network chips."""
-    from scamhunter.agent.loop import coin_and_network, evm_key_for_selection
-
-    assert coin_and_network("Tether (USDT - ERC20)") == ("USDT", "ERC20")
-    assert coin_and_network("Ethereum (ETH)") == ("ETH", None)
-    assert coin_and_network("USDC (USD Coin)") == ("USDC", None)
-    assert coin_and_network("TRC20") == (None, "TRC20")
-    assert evm_key_for_selection("USDT", "ERC20") == "USDT-ERC20"
-    assert evm_key_for_selection("ETH", None) == "ETH"
-    assert evm_key_for_selection("USDC", None) == "USDC-ERC20"
-    assert evm_key_for_selection("USDT", "BEP20") is None  # another EVM network: not a target
-    assert evm_key_for_selection("USDT", "TRC20") is None
-    assert evm_key_for_selection("BTC", None) is None
 
 
 def test_the_history_says_where_the_page_ended() -> None:

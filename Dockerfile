@@ -23,6 +23,7 @@ RUN pip install .
 COPY config ./config
 COPY data ./data
 COPY docker/selftest.py ./docker/selftest.py
+COPY docker/preconnect_probe.py ./docker/preconnect_probe.py
 # The local mock exchange, for mock mode (`scamhunter agent-mock`); loopback only.
 COPY tests/fixtures/mock_exchange ./tests/fixtures/mock_exchange
 

@@ -64,6 +64,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - mail.tm verified live through the proxy (create, poll, read one plain-text message, 2026-10-06); not tested: rate limits, token expiry, mail with codes or links from a real site.
 - Classification lean toward recall: precision/recall trade-off TODO(M6).
 - Navigation heuristics (`logged_in`, coverage by label confidence) can misjudge unusual sites.
+- The route guard stops an off-site page load before any request is sent, but Chromium still opens a connection (a TLS handshake, 3.8–6.7 KB in the proxy log, no page) to a navigation's target before the guard answers. The off-site host can see that connection. Tried and not effective (experiment of 2026-10-07, `docker/preconnect_probe.py`): `--disable-background-networking`, a `--disable-features` list for the loading predictor and prefetch, `--dns-prefetch-disable`, the `NetworkPredictionOptions` policy. A page-level cancel with the Navigation API removes the tunnel and is a PLAN M5 item; server-side redirects and `window.open` stay outside it.
 
 ## Safety
 - Crawler in hardened Docker (non-root, no capabilities, seccomp, Chromium sandbox on, downloads off), internal network only; egress via Squid that denies private/link-local/loopback by resolved IP and logs every request.

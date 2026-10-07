@@ -426,6 +426,7 @@ class RunSummary(BaseModel):
     navigation_stop_reasons: dict[str, int]
     total_tokens_in: int
     total_tokens_out: int
+    gateway_usage: dict | None = None  # the gateway usage log's total for this run (GatewayUsage)
 
 
 # ---------- Output file (§3.4) ----------

@@ -974,3 +974,44 @@ Three sites, 13:13 to 13:24, about $0.6 estimated (252k input and 8k output toke
 - **Another finding (012):** the agent re-selected USDT-TRC20 three times (steps 11, 15, 23, "retry TRC20") because a shared TRON address is not counted by coverage (only the EVM rule exists): the TRON address carries USDT and USDC labels at 0.4 only. About 8 of its 24 turns.
 - **Not known from the files:** how many confirmation prompts appeared and how they read (expected: 145 one at the email-lookup form; 012 three: registration, login, the code form); the user can say.
 - Other: `first judgment` notes are present on all three; no policy refusals; no hops (none offered); mail.tm answered for all three (`api.mail.tm` tunnels at 13:13, 13:15, 13:17).
+
+## 2026-10-07 14:30 · H+? · DECISION [limit] (user): criterion 1 of the live rerun reworded; 071 and 145 accepted; where the CAPTCHA refusal was tested
+- **Criterion 1** for the 145/071/012 rerun now reads: "no off-site page load or request; a preconnect handshake was observed (3 tunnels, up to 6.7 KB)". Supersedes the "met for page loads and not met for connections" wording of 13:40. The handshake is a connection, not a page, and nothing was requested on it as far as the sizes and the unchanged page show (an HTTPS tunnel hides the requests).
+- **Accepted outcomes:** 071 ending `no_progress` (the page never leaves its loader; the guard blocks the self-redirect) and 145 stopping by itself at the registration form (`invite_code`, image CAPTCHA noted in the rationale) are accepted as the correct behaviour for those sites.
+- **The CAPTCHA refusal was tested on saved pages and the mock only:** 145's saved registration DOM (the `image_text` detector finds the picture and its input) and the `image_captcha` mock variant with a script that reads and types the code. Claude has not been seen to type a picture code since the fix: in the live rerun and the mock regression the model stopped before typing. The policy's refusal on a live site is untested.
+
+## 2026-10-07 14:30 · H+? · RESULT [limit] (user's timebox: 20 minutes, 9 used): preconnect experiment, no switch works; limitation documented
+`docker/preconnect_probe.py` through the egress proxy (run `preconnect-1`): load `https://example.com/` (allowed), install the 204 route guard, make the page set `location.href` to a different harmless IANA host, close the browser, count the tunnels the proxy logged for that host. Each configuration used its own target.
+| configuration | tunnel to the target? (bytes server→client) |
+|---|---|
+| baseline, guarded (`example.org`, `example.net`) | yes, 4,818 and 4,801 |
+| `--disable-background-networking` (`www.iana.org`) | yes, 3,805 |
+| `--disable-features=LoadingPredictor,NavigationPredictor,PreconnectToSearch,SpeculativePreconnect,NetworkPrediction,PrefetchProxy,Prerender2` (`www.example.edu`) | yes, 3,818 |
+| `--dns-prefetch-disable` (`www.iana.org`) | yes, 3,806 |
+| managed policy `NetworkPredictionOptions=2` in `/etc/chromium/policies/managed` and `/etc/opt/chrome/policies/managed` (`example.org`, `www.iana.org`) | yes, 4,819 and 3,807 (whether Chromium read the policy could not be shown: `chrome://policy` renders empty in headless) |
+| control, no guard: a full load of `www.example.org` / `www.example.net` | 7,018 and 6,998: the extra ~3 KB is the page, so the guarded tunnels are handshake-only |
+- **Conclusion:** none of the switches removes the connection; the policy file was removed from the image again (no effect, nothing kept; the selftest condition did not arise). The README states the limitation.
+- **What does work, not adopted (outside the instruction, informational):** cancelling the navigation inside the page with the Navigation API (`navigation.addEventListener('navigate', e => e.preventDefault())` from an init script) left **no tunnel** in three runs (with and without the route guard). Gaps: server-side redirects and `window.open` are not covered, and the allowed domain must change after a confirmed hop (an init script is fixed per document; it needs a per-document source of the current domain). Recorded as a PLAN M5 item.
+
+## 2026-10-07 14:30 · H+? · DECISION [arch] (user): the run summary prints the gateway usage-log total; that figure is the one for M6 estimates
+- **Which figure was right for the live rerun:** the terminal's **$0.35**. From `runs/llm_cache/usage.jsonl` (the 46 calls after the last mock call, sites 145, 071, 012): **$0.353** with cache reads at 0.1x and cache writes at 1.25x of the input price (145 $0.052, 071 $0.081, 012 $0.220; 252,585 tokens in, 7,891 out, 0 gateway-cache hits), matching the checkpoint's token counts. My "about $0.6" priced all input tokens at the full $2/M and ignored the prompt cache ($0.58 on those tokens without discounts). Wrong figure, withdrawn.
+- **Change:** `llm/usage_log.py` (`read_usage`, `total`); `scamhunter run` and `rescore` print "LLM cost this invocation (gateway usage log): $X (N calls, M gateway-cache hits; tokens)" counting only the log lines added during the invocation for this run's sites, write `runs/<id>/usage.json` and put it in `summary.json` (`gateway_usage`). The run's own running estimate (the spend cap's tally) is still printed, labelled as such. Limit: another process using the gateway at the same time and on the same site ids would be counted. Tests with a fake log.
+- For M6 (160 sites) the cost estimate comes from per-site averages of this figure, not from token counts.
+
+## 2026-10-07 14:30 · H+? · DECISION [arch] (user): a shared address covers every asset in its family, with a sharing guard
+- New `agent/coverage.py` (`CoverageTracker`), used by the loop instead of the EVM-only rule. Families: EVM (ETH, USDT-ERC20, USDC-ERC20), TRON (USDT-TRC20, USDC-TRC20), BTC. **Selection rule:** a primary address visible in the page text of a deposit page, while the agent has a coin selected, covers that coin's asset in the address's family (EVM with no network named is taken as ERC-20, TRON as TRC-20; BEP-20 and other coins count nothing). **Sharing rule (user's):** an address seen for two different selections (a non-target selection such as USDT/BEP20 counts) is shared and covers its whole family at once.
+- **The guard, and why:** a single sighting never covers the family. The mock exchange derives one address per coin and network, and so do many real kits; covering the family on the first EVM address would end such runs early with 1 of 3 EVM assets. The first version of the rule (coins named within 300 characters) already failed the hop test for that kind of reason (the chips sit beside the address); the browser tests with per-coin addresses pass with this one (21 passed: solver variants, hop, guard).
+- **Replay on 012's saved pages** (`eval/coverage_replay.py`; selections from the trace, snapshots from the run):
+| asset | old label rule | selection only | selection + sharing |
+|---|---|---|---|
+| BTC | turn 7 | 7 | 7 |
+| ETH | never | 9 | 9 |
+| USDT-ERC20 | never | 13 | 13 |
+| USDT-TRC20 | never | 11 | 11 |
+| USDC-ERC20 | never | 17 | **13** |
+| USDC-TRC20 | never | never (the site has no such option) | never |
+  The old rule covered 1 of 6; the new one 5 of 6, all it can reach by **turn 13**. The agent called `done` at turn 24, so **up to 11 turns (46%) could be saved** (earlier pilot run: all reachable by turn 14, `done` at turn 29: up to 15). That is an upper bound: the agent still sees USDC-TRC20 as missing and may keep looking for it; the turns it spent re-selecting USDT-TRC20 (15 and 23, "retry TRC20") and USDC (17) are the ones the rule removes for certain. The saved turns have not been measured live.
+- Risk: a site that shows the *same* address for two coins but a different one for a third of the same family would end early for the third; accepted, the sharing evidence is two selections of the same family, and the agent's `done` rationale still names what it saw.
+
+## 2026-10-07 14:30 · H+? · DECISION [arch]: how "the agreed scope cuts" are read for M4 and M5 (to be corrected by the user if wrong)
+Cut or deferred, not to be built now: the mock wallet (out of v1, README), cross-site template clustering (README "with more time"), the Stagehand `ElementProvider` trial (the pilot's failures were not element-finding), OCR on non-QR images, the per-account address test (README note), the cloud-server comparison, fix 8's *mobile-UA capture* variant (the extraction of app-download URLs stays in M4). Open for the user, not decided by me: the navigation trigger (account-flow or crypto signals) and the signals-only rule for dead sites (needs the full live run's base rates, so it follows M6).

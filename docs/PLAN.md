@@ -134,6 +134,7 @@ Adjust the hours to the real schedule.
 ### M5. Full hardening
 
 - [ ] Container: read-only root filesystem (`cap_drop`, `no-new-privileges` and limits already done in M1)
+- [ ] Stop the connection to off-site navigation targets (LOG 2026-10-07 13:40 and the preconnect experiment): cancel off-site navigations inside the page with the Navigation API (`navigate` event, init script), which opened no tunnel in the probe, with the allowed domain updated after a confirmed hop; keep the route guard and `back` as backups; server-side redirects and `window.open` need their own handling
 - [ ] Re-run `make selftest`; review `egress.log` for anything unexpected
 - [ ] Replace the nip.io DNS-rebinding probe with a DNS-independent test (a local resolver that returns a link-local IP for a test name; assert the proxy refuses it); an inconclusive result must fail closed for real-site runs (moved here from "must do before step F", LOG 2026-10-06 21:06)
 - [ ] Verify the Chromium sandbox is on inside the container (no silent `--no-sandbox`)
