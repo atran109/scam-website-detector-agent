@@ -85,6 +85,7 @@ def to_record(result: SiteResult, run_dir: Path, out_dir: Path) -> OutputRecord:
             steps=len(nav.steps),
             stop_reason=nav.stop_reason,
             blocked_at=nav.blocked_at,
+            linked_domains=nav.linked_domains,
         )
         if nav
         else None,

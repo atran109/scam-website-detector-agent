@@ -374,6 +374,7 @@ class NavigationTrace(BaseModel):
     logged_in: bool
     reached_deposit: bool
     assets_tried: list[str]  # coins/networks selected on deposit page
+    linked_domains: list[str] = []  # refused or undone target URLs on other sites
 
 
 # ---------- Result ----------
@@ -441,6 +442,7 @@ class NavigationSummary(OutputModel):
     steps: int = Field(ge=0)
     stop_reason: StopReason
     blocked_at: BlockedReason | None
+    linked_domains: list[str] = []  # off-site targets the agent was refused or sent back from
 
 
 class OutputRecord(OutputModel):

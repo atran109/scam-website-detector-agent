@@ -123,3 +123,33 @@ def test_downscale_png_limits_the_longest_side() -> None:
     tiny = io.BytesIO()
     Image.new("RGB", (100, 100)).save(tiny, format="PNG")
     assert downscale_png(tiny.getvalue()) == tiny.getvalue()
+
+
+def test_gate_hints_need_error_wording_not_a_label() -> None:
+    from scamhunter.browser.page_state import gate_hints
+    from scamhunter.models import BlockedReason
+
+    assert gate_hints("Register\ninvalid invitation code") == [BlockedReason.INVITE_CODE]
+    assert gate_hints("Invitation code\nFields marked * are required") == []
+    assert gate_hints("SMS verification code required") == [BlockedReason.SMS_VERIFICATION]
+    assert gate_hints("Phone number\nSMS verification code") == []
+    assert gate_hints("Sorry, our service is not available in your country.") == [
+        BlockedReason.GEO_BLOCK
+    ]
+
+
+def test_captcha_challenge_from_iframe_or_wording() -> None:
+    from scamhunter.browser.page_state import CaptchaWidget
+
+    widget = (CaptchaWidget("recaptcha_checkbox", (0, 0, 10, 10)),)
+    assert not facts(text="I'm not a robot").captcha_challenge
+    plain = compute_facts(
+        "https://x.test/", "", [], "Select all images with buses", [], LANDING, widget
+    )
+    assert plain.captcha_challenge
+    bframe = (*widget, CaptchaWidget("challenge", (0, 20, 10, 10)))
+    assert compute_facts("https://x.test/", "", [], "", [], LANDING, bframe).captcha_challenge
+    # challenge wording without any CAPTCHA widget on the page is not a challenge
+    assert not compute_facts(
+        "https://x.test/", "", [], "Select all images", [], LANDING
+    ).captcha_challenge

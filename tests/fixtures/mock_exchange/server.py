@@ -3,8 +3,9 @@
 For developing and testing the navigation agent offline (DESIGN §2.2 principle 6). It mimics a
 cheap "H5 app kit" exchange and is deliberately hostile in the ways real ones are:
   - variants: semantic UI or plain <div> buttons, invite code required/visible, SMS gate,
-    CAPTCHA widget, email verification, forced Connect Wallet modal, amount-before-address,
-    prompt-injection text and an off-domain link;
+    reCAPTCHA-like widget (an image challenge appears after one click), email verification,
+    forced Connect Wallet modal, amount-before-address, prompt-injection text and an off-domain
+    link;
   - traps in every variant: Withdraw, Confirm payment, "I have paid", Upload receipt;
   - decoys: token contracts in the coin-list API and a labelled contract in the footer;
   - per-account deposit addresses, valid under our own validators.
@@ -298,6 +299,8 @@ def _make_handler(ex: MockExchange) -> type[BaseHTTPRequestHandler]:
                 )
             if parts.path == "/qr.png":
                 return self._send(200, qr_png(query.get("data", [""])[0]), "image/png")
+            if parts.path.startswith("/recaptcha/"):  # stand-in for Google's widget frames
+                return self._send(200, b"<html><body>mock captcha frame</body></html>", "text/html")
             if parts.path == "/_mail":  # test-only mock inbox (stands in for mail.tm)
                 return self._json(200, ex.inbox.get(query.get("to", [""])[0], []))
             if parts.path.startswith("/api/"):

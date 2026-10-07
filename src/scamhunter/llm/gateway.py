@@ -26,6 +26,10 @@ from scamhunter.config import load_settings
 log = logging.getLogger("llm-gateway")
 
 MAX_TOKENS_CAP = 16_000
+# Per-request API timeout (seconds) and SDK retries by role. A navigator step normally answers
+# in ~4 s; one request hung ~10 min on the SDK's 600 s default (2026-10-06), so navigator calls
+# fail fast and the agent loop counts a failed step instead of waiting.
+REQUEST_LIMITS = {"navigator": (60.0, 2), "judge": (300.0, 3), "helper": (120.0, 3)}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Models that accept fallbacks="default" (refusal re-run server-side); Haiku 4.5 does not.
 FALLBACK_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5")
@@ -116,12 +120,14 @@ class Gateway:
             return {**result, "cached": True}
 
         params = req.request.model_dump(exclude_none=True)
+        timeout, retries = REQUEST_LIMITS[req.role]
+        client = self.client.with_options(timeout=timeout, max_retries=retries)
         if model in FALLBACK_MODELS:
-            response = self.client.beta.messages.create(
+            response = client.beta.messages.create(
                 model=model, betas=[FALLBACK_BETA], fallbacks="default", **params
             )
         else:
-            response = self.client.messages.create(model=model, **params)
+            response = client.messages.create(model=model, **params)
         result = {
             "ok": True,
             "model": response.model,
@@ -180,6 +186,8 @@ def _make_handler(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                         "retryable": exc.status_code >= 500,
                     },
                 )
+            except anthropic.APITimeoutError:
+                self._send(504, {"ok": False, "error": "API timeout", "retryable": False})
             except anthropic.APIConnectionError:
                 self._send(502, {"ok": False, "error": "API connection error", "retryable": True})
 

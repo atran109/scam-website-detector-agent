@@ -545,6 +545,7 @@ class NavigationTrace(BaseModel):
     logged_in: bool
     reached_deposit: bool
     assets_tried: list[str]        # coins/networks selected on deposit page
+    linked_domains: list[str] = [] # refused or undone target URLs on other sites (2026-10-06)
 
 # ---------- Result ----------
 class SiteResult(BaseModel):
@@ -595,6 +596,7 @@ class NavigationSummary(BaseModel):
     steps: int
     stop_reason: StopReason
     blocked_at: BlockedReason | None
+    linked_domains: list[str] = [] # off-site targets the agent was refused or sent back from
 
 class OutputRecord(BaseModel):
     url: str                       # exactly as given in data/urls.txt
@@ -679,7 +681,8 @@ The example below is illustrative, not a real finding (`TXyz…` is a placeholde
         "reached_deposit": true,
         "steps": 11,
         "stop_reason": "goal_reached",
-        "blocked_at": null
+        "blocked_at": null,
+        "linked_domains": ["https://t.me/example_support"]
       },
       "notes": []
     },
@@ -1025,13 +1028,15 @@ snapshot ─► patterns.py   finds candidates in: visible text, attributes, scr
 - **Clicks on deposit pages.** "Confirm", "Next", "Recharge", "Submit order"-type clicks are allowed only when the page has no card or bank fields and no wallet signature request. Always blocked, on any page: "I have paid", "upload receipt / proof of payment", **"Confirm payment" (decided 2026-10-06: always blocked like "I have paid"; plain "Confirm"/"Next" are the allowed deposit submits)**, payment confirmation with card or bank details, anything that signs or approves, swaps, buys, or withdraws.
 - **`click_at` (decided 2026-10-06).** Refused on deposit pages: the policy cannot read what is drawn at a coordinate, and "I have paid" must never be clicked. Elsewhere a point inside a listed element gets that element's click rules.
 - **Typing (decided 2026-10-06).** Placeholders only from the identity (`email, password, username, first_name, last_name, phone`). A literal is at most 40 characters and is refused if it contains `@`, looks like a long number (card or phone), or is a phrase of 6+ words. Password fields take only `{identity.password}`, and that placeholder goes only into a password field. Fields for seed phrases or private keys, and card or bank fields, are never filled. Identity-document fields are never filled, and an **identity-document upload** (a file input or "upload ID/passport/selfie" control) is refused with `blocked_at: kyc`. No file input is ever used.
-- **Links (proposed 2026-10-06).** A click on a link whose `href` is on another registrable domain is refused, like `goto`. A click that still ends on another site (script navigation) is undone with `back` and counts as a failed step.
+- **Links (decided 2026-10-06).** Links and `goto` may go anywhere on the same registrable domain (eTLD+1, subdomains included). A click on a link whose `href` is on another registrable domain is refused, like `goto`. A click that still ends on another site (script navigation) is undone with `back` and counts as a failed step. Every refused or undone target URL is recorded in `linked_domains` (trace and output): where a scam site sends people (Telegram, other domains) is evidence.
+- **CAPTCHA (decided 2026-10-06, §7).** Widgets are detected in code from known iframes and selectors (reCAPTCHA anchor/bframe, Turnstile, hCaptcha, GeeTest and slider kits) plus challenge wording. One click on a checkbox-style widget (reCAPTCHA checkbox, Turnstile) is allowed per site. A second click, any other kind (hCaptcha, slider), or anything while a challenge is showing (images, audio, slider) is refused with `blocked_at: captcha`, and CAPTCHA fields are never filled.
 - **Refusals are logged.** Every refused action is an `AgentStep` with `allowed=false` and the policy's reason. The trace summary counts refusals per rule, so `click_at` on deposit pages and payment-claim clicks can be tallied.
 - **Several calls in one reply (decided 2026-10-06).** A reply may carry several `fill`/`select` calls followed by at most one other action (typically the submit click). Each is policy-checked on its own, in order; the batch stops at the first refusal or failure. A *step* is one model reply.
-- **Gates.** A refusal that names a gate (`wallet_required`, `kyc`, `payment_required`) goes back to the model, which ends the run with `done(blocked_at=…)`. If the run ends another way with no deposit address, the last gate hit becomes `blocked_at`.
+- **Gates.** A refusal that names a gate (`wallet_required`, `kyc`, `payment_required`, `captcha`) goes back to the model, which ends the run with `done(blocked_at=…)`. Gates are also seen in code: a CAPTCHA widget on the page, and gate wording after a submit ("invalid invitation code", "SMS code required", "not available in your country"). Each step message carries one line, "Gates seen so far: …". If the run ends another way with no deposit address, the most recent gate seen becomes `blocked_at`.
+- **History.** The model sees the last 12 *steps*, one line each (all of a batch's actions and results on one line), so a repeated cycle is visible to it.
 - **Wallet.** Connect-wallet clicks are allowed only when the mock wallet is injected (it refuses to sign and logs requested recipients); sign/approve stay blocked even then. The mock wallet is deferred until after the M3 pilot: until it exists, connect-wallet clicks are blocked and a site that needs a wallet ends with `blocked_at: wallet_required`. Wallet-gated sites are tallied in the pilot, and the mock wallet is built if there are several.
 - **No tool call.** A model reply with text and no tool call counts as a failed step (toward `max_consecutive_failures`).
-- Budgets: max steps, max seconds, a hard per-site token cap in code (`BUDGET_TOKENS`, proposed 2026-10-06), and loop detection (same URL + same action 3 times → `NO_PROGRESS`). A smaller step budget is considered for `fake_shop` sites (shops rarely have deposit flows).
+- Budgets: max steps; max seconds as a hard **wall-clock** limit enforced by a watchdog that cancels the run mid-call (decided 2026-10-06: a sleeping host paused the monotonic clock and a 10-minute API stall went past the old between-steps check); a per-request gateway timeout (navigator 60 s, 2 retries); a hard per-site token cap in code (`BUDGET_TOKENS`); loop detection (same URL + same action 3 times → `NO_PROGRESS`); and page-cycle detection (the same 2–6 pages in the same order: a warning to the model at 3 repeats, `NO_PROGRESS` at 4, with the gate fallback). A smaller step budget is considered for `fake_shop` sites (shops rarely have deposit flows).
 
 A rejected action is fed back to the model as a tool error, so it can choose something else.
 
@@ -1193,4 +1198,6 @@ Defaults chosen on 2026-10-04. Items marked "revisit" depend on triage or pilot 
 | Wallet-drainer mock, clustering | Cut-list items; build only if the pilot shows they pay off | Pilot and triage |
 | Wayback recovery | In scope (M2/M4), time-boxed to 2 h of build time | If it overruns, fall back to the signals-only rule |
 | Boundaries | No payments, no wallet connections, no real personal data, no CAPTCHA-solving services, no contact with scammers beyond registration | — |
+| CAPTCHA (2026-10-06) | At most one click on a checkbox-style widget (reCAPTCHA checkbox, Cloudflare Turnstile). If a challenge appears (image, audio, slider) or the gate is still present, end with `blocked_at: captcha`. Never interact with challenges; never use solving services. Enforced in code (widget/challenge detection from known iframes and selectors, §5.5) and stated in the prompt | Pilot shows a checkbox click passes often enough to matter, or real kits use widgets the detector misses |
+| Agent wall clock (2026-10-06) | `max_seconds` per site is wall-clock time and cancels in-flight calls; navigator API requests time out after 60 s | — |
 | Reviewing generated code | Read every diff for the agent loop, validators and policy checks; be able to explain every module | — |

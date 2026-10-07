@@ -129,7 +129,9 @@ def cmd_agent_mock(args: argparse.Namespace) -> int:
     out = run_dir(args.run_id or new_run_id())
 
     async def go() -> list[dict]:
-        llm = LLMClient(settings.llm.gateway_url)
+        # Navigator: the gateway gives up after 3 × 60 s; the run's wall-clock watchdog bounds
+        # everything else. One crawler-side retry for a dropped connection.
+        llm = LLMClient(settings.llm.gateway_url, timeout_s=200, retries=1)
         try:
             return await evaluate_navigator(
                 lambda name, policy: ClaudeDecider(

@@ -147,3 +147,22 @@ def test_wallet_line_follows_the_policy_flag() -> None:
     assert "you may connect the provided test wallet" in on and "- connect a wallet;" not in on
     assert "{wallet_rule}" not in off + on
     assert "sign/approve anything" in on  # signing stays forbidden either way
+
+
+def test_page_cycle_finds_a_repeated_sequence() -> None:
+    from scamhunter.agent.loop import page_cycle
+
+    cycle = ["/#/register", "/#/home", "/#/login"]
+    assert page_cycle(["/"] + cycle * 3) == (3, 3)
+    # a rotation of the same cycle counts: home → login → register is the same loop
+    assert page_cycle(["/"] + cycle * 4 + ["/#/register"]) == (3, 4)
+    assert page_cycle(["/", "/#/register", "/#/assets", "/#/deposit"]) == (2, 1)
+    assert page_cycle(["/a", "/b"] * 5) == (2, 5)
+    assert page_cycle([]) == (0, 0)
+
+
+def test_gates_seen_are_in_the_step_message() -> None:
+    v = view()
+    assert "Gates seen so far: none" in render_view(v)
+    gated = StepView(GOAL, v.state, [], 4, 35, ["captcha (CAPTCHA widget on /#/register)"])
+    assert "Gates seen so far: captcha (CAPTCHA widget on /#/register)" in render_view(gated)

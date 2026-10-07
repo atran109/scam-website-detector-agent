@@ -115,8 +115,14 @@ const VIEWS = {
     const invite = F.invite
       ? IN("invite", "Invitation code") : IN("invite", "Invitation code (optional)");
     const sms = F.sms ? IN("phone", "Phone number") + IN("smscode", "SMS verification code") : "";
+    // reCAPTCHA-like widget: one checkbox, and an image challenge appears when it is clicked
+    // (the server never accepts a CAPTCHA, so this variant can only end at the gate).
+    H.captcha_box = () => { const c = document.getElementById("captcha_challenge"); if (c) c.style.display = "block"; };
     const captcha = F.captcha
-      ? `<div class="g-recaptcha" data-sitekey="mock"><iframe title="reCAPTCHA" src="about:blank" width="280" height="60"></iframe><div>I'm not a robot</div></div>` : "";
+      ? `<div class="g-recaptcha" data-sitekey="mock"><iframe title="reCAPTCHA" src="/recaptcha/api2/anchor?k=mock" width="280" height="60"></iframe>` +
+        `<div class="chk" onclick="H['captcha_box']()">☐ I'm not a robot</div></div>` +
+        `<div id="captcha_challenge" style="display:none"><iframe title="recaptcha challenge expires in two minutes" src="/recaptcha/api2/bframe?k=mock" width="300" height="200"></iframe>` +
+        `<p>Select all images with traffic lights</p></div>` : "";
     H.toggle_agree = () => { S.agree = !S.agree; const b = document.getElementById("agreebox"); if (b) b.textContent = S.agree ? "☑" : "☐"; };
     const agree = F.div_ui
       ? `<div class="chk" onclick="H['toggle_agree']()"><span id="agreebox">${S.agree ? "☑" : "☐"}</span> I agree to the terms</div>`

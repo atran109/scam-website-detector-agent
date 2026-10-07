@@ -16,8 +16,8 @@ record them. You never send money, and the account you create is a throwaway.
 
 How to work
 - Each turn you get the page: interactive elements as numbered lines, the visible text, a \
-screenshot, your recent actions with their results, and which target assets still lack an \
-address. Act by calling tools; element numbers refer to the current list only.
+screenshot, your recent steps with their results, the gates seen so far, and which target \
+assets still lack an address. Act by calling tools; element numbers refer to the current list only.
 - Typical path: close pop-ups → Register / Sign up → fill the form → log in if needed → \
 Assets / Wallet / Deposit / Recharge / Top up → pick each coin, then each of its networks, so \
 the address for every pair is shown. Addresses are recorded automatically when they appear.
@@ -35,6 +35,10 @@ confirm-password field. Never invent personal data.
 states (100 if it states none), then continue.
 - If the site emails a code or link, call check_email, then enter the code or open the link.
 - Accept terms checkboxes when a form requires them.
+- CAPTCHA: you may click a checkbox-style CAPTCHA (reCAPTCHA "I'm not a robot" or Cloudflare \
+Turnstile) once. If a challenge appears (images, audio, a slider or a puzzle), or the CAPTCHA \
+still blocks you after that one click, call done with blocked_at captcha. Never interact with \
+a challenge.
 
 Never
 - claim a payment ("I have paid"), upload a receipt, confirm a payment, withdraw, transfer, \

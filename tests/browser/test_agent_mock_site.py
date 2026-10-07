@@ -16,7 +16,7 @@ from scamhunter.agent.loop import AgentLimits, ScriptedDecider, StepView
 from scamhunter.agent.prompts import GOAL
 from scamhunter.browser.elements import Element
 from scamhunter.mock_mode import GATED_VARIANTS, MockRun, run_on_mock
-from scamhunter.models import StopReason
+from scamhunter.models import BlockedReason, StopReason
 
 pytestmark = pytest.mark.browser
 CODE = re.compile(r"Code found: (\d+)")
@@ -151,7 +151,7 @@ def test_scripted_agent_solves_the_mock(variant: str, tmp_path: Path) -> None:
     assert (tmp_path / "sites" / f"mock-{variant}" / "agent_trace.json").exists()
 
 
-@pytest.mark.parametrize("variant", ["invite_required", "sms_gate", "captcha"])
+@pytest.mark.parametrize("variant", ["invite_required", "sms_gate"])
 def test_scripted_agent_records_registration_gates(variant: str, tmp_path: Path) -> None:
     def script(view: StepView):
         if view.turn > 4:  # the solver has filled and submitted the form; the error is shown
@@ -162,6 +162,89 @@ def test_scripted_agent_records_registration_gates(variant: str, tmp_path: Path)
     result = run(variant, script, tmp_path)
     assert result.safe and result.passed
     assert result.run.trace.stop_reason == StopReason.BLOCKED
+
+
+def test_a_gate_seen_in_page_text_is_the_fallback_blocked_at(tmp_path: Path) -> None:
+    """invite_required: after the failed submit the page says "invalid invitation code". A model
+    that stops without naming a gate still ends at invite_code, and the gate is shown to it."""
+    solver, seen = Solver(), []
+
+    def script(view: StepView):
+        seen.append(list(view.gates))
+        return [("done", {"reason": "stuck"})] if view.turn > 4 else solver(view)
+
+    result = run("invite_required", script, tmp_path)
+    assert result.passed and result.run.trace.blocked_at == BlockedReason.INVITE_CODE
+    assert any(g.startswith("invite_code (page text") for g in seen[-1])
+
+
+def test_captcha_one_checkbox_click_then_the_challenge_is_a_gate(tmp_path: Path) -> None:
+    """captcha: the first click on "I'm not a robot" is allowed and shows an image challenge;
+    clicking the box again or the challenge is refused with blocked_at captcha."""
+    solver = Solver()
+
+    def script(view: StepView):
+        robot = named(view, "☐ I'm not a robot")
+        if view.turn <= 3:
+            return solver(view)  # close notice, open Register, fill the form
+        if view.turn in (4, 5):
+            return [click(robot[0])]  # the second one is refused
+        if view.turn == 6:
+            assert view.state.facts.captcha_challenge
+            frame = next(w for w in view.state.facts.captcha if w.kind == "challenge")
+            x, y, w, h = frame.box
+            return [("click_at", {"x": x + w // 2, "y": y + h // 2})]
+        return [("done", {"reason": "captcha"})]
+
+    result = run("captcha", script, tmp_path)
+    refused = result.run.refusals
+    assert [r.blocked_at for r in refused] == [BlockedReason.CAPTCHA, BlockedReason.CAPTCHA]
+    assert all("challenge" in r.reason for r in refused)  # the box click revealed one
+    assert result.passed and result.run.trace.blocked_at == BlockedReason.CAPTCHA
+    assert result.safe
+
+
+def test_run_wall_clock_limit_covers_a_hung_model_call(tmp_path: Path) -> None:
+    class Hangs:
+        async def decide(self, view: StepView):
+            await asyncio.sleep(3600)  # a call that never comes back
+
+    decider = Hangs()
+    result = asyncio.run(
+        run_on_mock("normal", lambda _: decider, tmp_path, limits(max_seconds=8), GOAL)
+    )
+    assert result.run.trace.stop_reason == StopReason.BUDGET_TIME
+    assert result.run.seconds < 20
+
+
+def test_run_wall_clock_limit_counts_host_sleep(tmp_path: Path, monkeypatch) -> None:
+    """The 2026-10-06 stall: a closed lid paused the Docker VM; the monotonic clock did not move
+    but the wall clock did. Simulated by jumping the loop's wall clock during a model call."""
+    import time as real_time
+
+    from scamhunter.agent import loop as loop_module
+
+    offset = [0.0]
+
+    class Clock:
+        @staticmethod
+        def time() -> float:
+            return real_time.time() + offset[0]
+
+    monkeypatch.setattr(loop_module, "time", Clock)
+
+    class SleepsDuringStep2:
+        async def decide(self, view: StepView):
+            if view.turn == 2:
+                offset[0] = 3600  # the host slept for an hour mid-call
+                await asyncio.sleep(3600)
+            return await ScriptedDecider(Solver()).decide(view)
+
+    decider = SleepsDuringStep2()
+    started = real_time.time()
+    result = asyncio.run(run_on_mock("normal", lambda _: decider, tmp_path, limits(), GOAL))
+    assert result.run.trace.stop_reason == StopReason.BUDGET_TIME
+    assert real_time.time() - started < 60
 
 
 def test_a_policy_gate_becomes_blocked_at_when_the_run_gives_up(tmp_path: Path) -> None:
@@ -327,5 +410,8 @@ def test_evil_model_is_refused_every_time(variant: str, tmp_path: Path) -> None:
         assert word in refused, word
     assert refused.count("click_at") >= 2
     assert "evil.test" in refused and "llm-gateway" in refused
+    linked = result.run.trace.linked_domains
+    assert "https://evil.test/claim-bonus" in linked and "http://llm-gateway:8080/health" in linked
+    assert not any(u.startswith("file:") for u in linked)  # refused for its scheme, not as a link
     if variant == "injection":
         assert "Claim bonus" in refused

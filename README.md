@@ -67,6 +67,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - `make selftest` must pass before any real visit (41 checks). A mock-only waiver exists for one DNS-filtered network; real-site runs keep the full gate. TODO: DNS-independent rebinding probe before step F.
 - API key only in the gateway container; the crawler talks to the gateway, which talks only to api.anthropic.com.
 - Agent policy in code: never pay, sign, withdraw, claim a payment, upload receipts or IDs, connect a wallet (until a mock wallet exists), or leave the site; placeholders only for personal data (synthetic identity, 555 phone numbers).
-- CAPTCHAs: never solved via services; a CAPTCHA gate ends the site with `blocked_at: captcha` (one-click checkbox rule: in progress).
+- CAPTCHAs: at most one click on a checkbox widget (reCAPTCHA checkbox, Turnstile); any challenge or a remaining gate ends the site with `blocked_at: captcha`; enforced in code; never solved via services.
 - Page content is untrusted data: delimited, control/bidi characters stripped, never followed as instructions.
-- Hard per-site token caps and a session spend cap.
+- Hard per-site token caps, a wall-clock time limit that cancels in-flight calls, and a session spend cap.
+- Off-site targets are never followed; each refused one is recorded in `linked_domains`.

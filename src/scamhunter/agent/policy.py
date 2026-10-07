@@ -14,7 +14,7 @@ import tldextract
 from scamhunter.agent.identity import FIELDS, PLACEHOLDER, placeholders_in
 from scamhunter.agent.tools import ALLOWED_KEYS, MAX_WAIT_SECONDS
 from scamhunter.browser.elements import Element
-from scamhunter.browser.page_state import CARD_BANK_FIELD, PageFacts
+from scamhunter.browser.page_state import CARD_BANK_FIELD, CHECKBOX_CAPTCHAS, PageFacts
 from scamhunter.models import ActionType, AgentAction, BlockedReason, Identity
 
 DEFAULT_DEPOSIT_AMOUNT = "100"
@@ -88,6 +88,12 @@ KYC_UPLOAD = re.compile(
     r"|上传身份证",
     re.I,
 )
+# A CAPTCHA control the widget detector may miss (custom wrappers): judged by its label.
+CAPTCHA_LABEL = re.compile(
+    r"i'?m not a robot|i am not a robot|verify (?:you are|you're) human|\bcaptcha\b|recaptcha"
+    r"|turnstile|hcaptcha|人机验证",
+    re.I,
+)
 AMOUNT_FIELD = re.compile(r"amount|quantity|金额|\bsum\b", re.I)
 
 
@@ -104,6 +110,9 @@ class Decision:
     allowed: bool
     reason: str = ""  # shown to the model when blocked
     blocked_at: BlockedReason | None = None  # a gate the loop should stop at, not retry around
+    linked_url: str | None = (
+        None  # a refused target on another site (NavigationTrace.linked_domains)
+    )
 
 
 ALLOW = Decision(True)
@@ -111,6 +120,10 @@ ALLOW = Decision(True)
 
 def _block(reason: str, blocked_at: BlockedReason | None = None) -> Decision:
     return Decision(False, reason, blocked_at)
+
+
+def _captcha_block(why: str) -> Decision:
+    return _block(f"{why}; call done with blocked_at captcha", BlockedReason.CAPTCHA)
 
 
 def _kyc_block() -> Decision:
@@ -135,6 +148,7 @@ class Policy:
         self.site_domain = site_domain
         self.identity = identity
         self.mock_wallet_active = mock_wallet_active  # connect-wallet clicks need it (§5.5)
+        self.captcha_clicks = 0  # at most one, on a checkbox-style widget (DESIGN §7)
 
     def check(self, action: AgentAction, elements: list[Element], facts: PageFacts) -> Decision:
         kind = action.type
@@ -146,6 +160,10 @@ class Policy:
                 return _block(f"element [{element.id}] is disabled")
             if element.input_type == "file":
                 return self._file_input(element)
+            if captcha := self._captcha_target(element, facts):
+                if kind != ActionType.CLICK:
+                    return _captcha_block("CAPTCHA fields are never filled")
+                return self._captcha_click(captcha, facts)
             if kind == ActionType.CLICK:
                 return self._click(element, facts)
             if kind == ActionType.FILL:
@@ -187,7 +205,11 @@ class Policy:
         if KYC_UPLOAD.search(label):
             return _kyc_block()
         if element.href and not self._href_on_site(element.href):
-            return _block(f"this link leaves {self.site_domain}; stay on the site")
+            return Decision(
+                False,
+                f"this link leaves {self.site_domain}; stay on the site",
+                linked_url=element.href,
+            )
         if WALLET_CONNECT.search(label):
             if self.mock_wallet_active:
                 return ALLOW
@@ -210,6 +232,8 @@ class Policy:
         x, y = action.x, action.y
         if x is None or y is None or not (0 <= x <= MAX_COORDINATE and 0 <= y <= MAX_COORDINATE):
             return _block("click_at needs x and y inside the page")
+        if widget := facts.captcha_at(x, y):
+            return self._captcha_click(widget.kind, facts)
         if facts.is_deposit_page:
             # What is under the point cannot be checked against the block list, and "I have paid"
             # must never be clicked, so coordinates are not accepted on deposit pages.
@@ -218,6 +242,31 @@ class Policy:
             left, top, width, height = e.box
             if e.in_view and left <= x <= left + width and top <= y <= top + height:
                 return self._click(e, facts)  # same rules as clicking that element
+        return ALLOW
+
+    # ---------- CAPTCHA (DESIGN §7, decided 2026-10-06) ----------
+
+    @staticmethod
+    def _captcha_target(element: Element, facts: PageFacts) -> str | None:
+        """The CAPTCHA kind an element belongs to, or None. By position inside a detected widget,
+        else by its label ("I'm not a robot") as a checkbox-style widget."""
+        left, top, width, height = element.box
+        if element.in_view and (widget := facts.captcha_at(left + width / 2, top + height / 2)):
+            return widget.kind
+        if CAPTCHA_LABEL.search(_label(element)):
+            return "recaptcha_checkbox"
+        return None
+
+    def _captcha_click(self, kind: str, facts: PageFacts) -> Decision:
+        """One click on a checkbox-style widget (reCAPTCHA checkbox, Turnstile); nothing else.
+        A challenge (images, audio, slider) is never touched."""
+        if facts.captcha_challenge or kind == "challenge":
+            return _captcha_block("a CAPTCHA challenge is showing; never interact with it")
+        if kind not in CHECKBOX_CAPTCHAS:
+            return _captcha_block(f"this CAPTCHA ({kind}) is a gate; never interact with it")
+        if self.captcha_clicks >= 1:
+            return _captcha_block("the one allowed CAPTCHA checkbox click is already used")
+        self.captcha_clicks += 1
         return ALLOW
 
     # ---------- typing ----------
@@ -298,7 +347,7 @@ class Policy:
         if parts.username or parts.password:
             return _block("URLs with credentials are not allowed")
         if registrable(parts.hostname) != self.site_domain:
-            return _block(f"goto stays on {self.site_domain}")
+            return Decision(False, f"goto stays on {self.site_domain}", linked_url=url)
         return ALLOW
 
 

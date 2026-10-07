@@ -9,6 +9,7 @@ fill/select calls and one final action; each is checked and run in order, and th
 the first refusal or failure. Every refused action is kept in the trace with the policy's reason.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -26,7 +27,13 @@ from scamhunter.agent.policy import LoopDetector, Policy, registrable
 from scamhunter.agent.tools import TOOLS, ParsedCall, ToolError, calls_after, pick_tool_calls
 from scamhunter.browser.capture import NetworkRecorder, load_snapshot_content, take_snapshot
 from scamhunter.browser.elements import ActionResult, perform
-from scamhunter.browser.page_state import Coverage, PageState, labelled_deposit_page, observe
+from scamhunter.browser.page_state import (
+    Coverage,
+    PageState,
+    gate_hints,
+    labelled_deposit_page,
+    observe,
+)
 from scamhunter.config import AgentSettings
 from scamhunter.extract.extractor import extract, merge_all
 from scamhunter.llm.client import LLMClient, LLMError, TokenUsage
@@ -52,7 +59,10 @@ log = logging.getLogger(__name__)
 # Hard per-site LLM token caps, checked before every model call (DESIGN §5.5 budgets).
 MAX_SITE_TOKENS_IN = 250_000
 MAX_SITE_TOKENS_OUT = 25_000
-HISTORY_LINES = 12  # recent actions shown to the decider
+HISTORY_LINES = 12  # recent steps shown to the decider, one line per step
+CYCLE_MAX_PERIOD = 6  # page cycles up to this many distinct pages are detected
+CYCLE_WARN, CYCLE_STOP = 3, 4  # repeats of the same page cycle: warn the model, then stop
+WATCHDOG_SECONDS = 1.0
 MAILBOX_POLLS = 4
 MAILBOX_POLL_SECONDS = 3.0
 SNAPSHOT_IDLE_MS = 2000  # deposit widgets are small XHRs; the snapshot also waits 1.5 s
@@ -82,6 +92,7 @@ class StepView:
     history: list[str]  # recent actions and their results, oldest first
     turn: int
     max_steps: int
+    gates: list[str] = field(default_factory=list)  # "captcha (CAPTCHA widget on /register)"
 
 
 @dataclass
@@ -135,7 +146,7 @@ class AgentRun:
     found_assets: set[str]
     first_address_turn: int | None  # step at which the first deposit address appeared
     full_coverage_turn: int | None  # step at which every target asset had an address
-    seconds: float
+    seconds: float  # wall clock
     call_usage: list[dict[str, int]] = field(default_factory=list)  # API usage per step
 
 
@@ -255,6 +266,10 @@ class NavigationLoop:
         self.found: set[str] = set()
         self.assets_tried: list[str] = []
         self.last_gate: BlockedReason | None = None
+        self.gates: dict[BlockedReason, str] = {}  # gate → how it was seen, latest last
+        self.linked: list[str] = []  # refused or undone targets on other sites
+        self.pages: list[str] = []  # URLs seen, consecutive repeats collapsed
+        self._cycle_warned: set[int] = set()
         self.password_submitted = False
         self.confirm_password_submitted = False
         self.logged_in = False
@@ -264,16 +279,25 @@ class NavigationLoop:
         self.full_coverage_turn: int | None = None
         self.call_usage: list[dict[str, int]] = []
         self._turns = 0
-        self._started = 0.0
+        self._started = 0.0  # wall clock (time.time): host sleep counts (2026-10-06 stall)
         self._last_call_tokens_in = 0
+        self._timed_out = False
 
     # ---------- public ----------
 
     async def run(self) -> AgentRun:
-        self._started = time.monotonic()
-        _, new = await self.evidence.capture(DiscoveryStage.LANDING)
-        self._count_found(new, turn=0)
-        stop, blocked_at = await self._steps()
+        self._started = time.time()
+        steps = asyncio.create_task(self._steps())
+        watchdog = asyncio.create_task(self._watchdog(steps))
+        try:
+            stop, blocked_at = await steps
+        except asyncio.CancelledError:
+            if not self._timed_out:
+                raise  # cancelled from outside, not by our time budget
+            self.history.append(f"stopped: {self.limits.max_seconds} s wall-clock budget")
+            stop, blocked_at = StopReason.BUDGET_TIME, None
+        finally:
+            watchdog.cancel()
         if blocked_at is None and stop != StopReason.GOAL_REACHED and not self.found:
             blocked_at = self.last_gate  # ended another way at a gate it had hit (§5.5 Gates)
             if blocked_at and stop in (StopReason.NOT_APPLICABLE, StopReason.NO_PROGRESS):
@@ -287,6 +311,7 @@ class NavigationLoop:
             logged_in=self.logged_in,
             reached_deposit=self.reached_deposit,
             assets_tried=self.assets_tried,
+            linked_domains=self.linked,
         )
         log.info(
             "agent stopped: %s%s after %d steps, %d refusals, found %s",
@@ -305,13 +330,26 @@ class NavigationLoop:
             found_assets=set(self.found),
             first_address_turn=self.first_address_turn,
             full_coverage_turn=self.full_coverage_turn,
-            seconds=time.monotonic() - self._started,
+            seconds=self._elapsed(),
             call_usage=self.call_usage,
         )
 
     # ---------- the loop ----------
 
+    async def _watchdog(self, steps: asyncio.Task) -> None:
+        """Hard wall-clock limit for the whole run, including an in-flight model call or browser
+        action. Uses time.time(), which, unlike the monotonic clock, keeps counting while the
+        host sleeps (the 2026-10-06 stall: a closed lid paused the Docker VM for 10 minutes)."""
+        while not steps.done():
+            if self._elapsed() >= self.limits.max_seconds:
+                self._timed_out = True
+                steps.cancel()
+                return
+            await asyncio.sleep(WATCHDOG_SECONDS)
+
     async def _steps(self) -> tuple[StopReason, BlockedReason | None]:
+        _, new = await self.evidence.capture(DiscoveryStage.LANDING)
+        self._count_found(new, turn=0)
         failures = 0
         for turn in range(1, self.limits.max_steps + 1):
             if self._elapsed() >= self.limits.max_seconds:
@@ -320,7 +358,10 @@ class NavigationLoop:
                 return StopReason.BUDGET_TOKENS, None
             self._turns = turn
             state = await self._observe(turn)
-            view = StepView(self.goal, state, self._recent(), turn, self.limits.max_steps)
+            if self._page_cycle(turn):
+                return StopReason.NO_PROGRESS, None
+            gates = [f"{g.value} ({how})" for g, how in self.gates.items()]
+            view = StepView(self.goal, state, self._recent(), turn, self.limits.max_steps, gates)
             reply = await self.decider.decide(view)
             self.usage.add(reply.usage, reply.cached)
             self.call_usage.append(dict(reply.usage))
@@ -334,7 +375,7 @@ class NavigationLoop:
                 return outcome
             failures = 0 if outcome else failures + 1
             if failures >= self.limits.max_consecutive_failures:
-                self.history.append(f"{turn}. stopping: {failures} failed steps in a row")
+                self.history.append(f"{turn + 1}. stopping: {failures} failed steps in a row")
                 return StopReason.NO_PROGRESS, None
         return StopReason.BUDGET_STEPS, None
 
@@ -352,42 +393,52 @@ class NavigationLoop:
         ran_any = False
         new_addresses: list[str] = []
         recorded_from = len(self.steps)
+        parts: list[str] = []  # this step's actions and results, joined into one history line
         finished = 0  # batch calls handled (run, refused or failed)
+        stop: tuple[StopReason, BlockedReason | None] | None = None
         for call in batch:
             finished += 1
             if isinstance(call, ToolError):
-                self.history.append(f"{turn}. ERROR: {call.message}")
+                parts.append(f"ERROR: {call.message}")
                 break
             action = call.action
             what = describe_action(action, state)
             if action.type == ActionType.DONE:
                 self._record(turn, state, action, True, None, "done")
-                self.history.append(f"{turn}. {what}")
-                return self._finish(call)
+                parts.append(what)
+                stop = self._finish(call)
+                break
             decision = self.policy.check(action, state.elements, state.facts)
             if not decision.allowed:
                 self.refusals.append(Refusal(turn, what, decision.reason, decision.blocked_at))
-                self.last_gate = decision.blocked_at or self.last_gate
+                if decision.blocked_at:
+                    self._note_gate(decision.blocked_at, f"refused: {what[:60]}")
+                if decision.linked_url:
+                    self._note_linked(decision.linked_url)
                 log.info("policy refused %s: %s", what, decision.reason)
                 self._record(turn, state, action, False, decision.reason, "refused")
-                self.history.append(f"{turn}. {what} → REFUSED by policy: {decision.reason}")
+                parts.append(f"{what} → REFUSED by policy: {decision.reason}")
                 break
             result = await self._execute(action, state)
             self._record(turn, state, action, True, result.detail or None, result.result)
-            self.history.append(f"{turn}. {what} → {result.result}{_detail(result)}")
+            parts.append(f"{what} → {result.result}{_detail(result)}")
             if not result.ok:
                 break
             ran_any = True
             self._note_progress(action, state)
             if self.loop_detector.record(state.url, action):
-                self.history.append(f"{turn}. stopping: the same action keeps repeating")
-                return StopReason.NO_PROGRESS, None
+                parts.append("stopping: the same action keeps repeating")
+                stop = (StopReason.NO_PROGRESS, None)
+                break
         skipped = [
             describe_action(c.action, state) if isinstance(c, ParsedCall) else "malformed call"
             for c in batch[finished:]
         ]
         if not_run := skipped + dropped:
-            self.history.append(f"{turn}. not run: " + "; ".join(not_run))
+            parts.append("not run: " + "; ".join(not_run))
+        self.history.append(f"{turn}. " + " | ".join(parts))
+        if stop is not None:
+            return stop
         if ran_any:
             stage = self._base_stage()
             if await labelled_deposit_page(self.page):
@@ -428,6 +479,8 @@ class NavigationLoop:
                 await self.page.go_back(wait_until="domcontentloaded")
             except PlaywrightError:
                 pass
+            if not left_to.startswith("chrome-error://"):
+                self._note_linked(left_to)
             return ActionResult(False, "left_site", f"went to {left_to[:120]}; went back")
         return result
 
@@ -462,6 +515,15 @@ class NavigationLoop:
             seconds_left=max(0, int(self.limits.max_seconds - self._elapsed())),
         )
         state = await observe(self.page, stage, coverage)
+        where = urlparse(state.url)
+        path = (where.path or "/") + (f"#{where.fragment}" if where.fragment else "")
+        if state.facts.captcha:
+            shown = "challenge showing" if state.facts.captcha_challenge else "widget"
+            self._note_gate(BlockedReason.CAPTCHA, f"CAPTCHA {shown} on {path[:40]}")
+        for gate in gate_hints(state.text):
+            self._note_gate(gate, f"page text on {path[:40]}")
+        if not self.pages or self.pages[-1] != state.url:
+            self.pages.append(state.url)
         if state.facts.is_deposit_page:
             state.stage = DiscoveryStage.DEPOSIT_PAGE
             self.reached_deposit = True
@@ -470,6 +532,32 @@ class NavigationLoop:
                 self.logged_in = True
                 self.registered = self.registered or self.confirm_password_submitted
         return state
+
+    def _note_gate(self, gate: BlockedReason, how: str) -> None:
+        self.gates.pop(gate, None)  # re-insert so the most recent gate is last
+        self.gates[gate] = how
+        self.last_gate = gate
+
+    def _note_linked(self, url: str) -> None:
+        if url not in self.linked:
+            self.linked.append(url[:500])
+
+    def _page_cycle(self, turn: int) -> bool:
+        """The same short sequence of pages visited over and over (register → home → login →
+        register …). Warn the model at CYCLE_WARN repeats; stop at CYCLE_STOP. True = stop."""
+        period, repeats = page_cycle(self.pages)
+        if repeats >= CYCLE_STOP:
+            self.history.append(
+                f"{turn}. stopping: the same {period} pages repeated {repeats} times"
+            )
+            return True
+        if repeats >= CYCLE_WARN and period not in self._cycle_warned:
+            self._cycle_warned.add(period)
+            self.history.append(
+                f"{turn}. WARNING: you have gone through the same {period} pages {repeats} times. "
+                "If a gate stops you, call done with blocked_at; otherwise try something different."
+            )
+        return False
 
     def _base_stage(self) -> DiscoveryStage:
         """The stage before deposit detection; a page labelled as a deposit page is upgraded
@@ -527,7 +615,7 @@ class NavigationLoop:
         return self.history[-HISTORY_LINES:]
 
     def _elapsed(self) -> float:
-        return time.monotonic() - self._started
+        return time.time() - self._started
 
     def _over_token_cap(self) -> bool:
         """True if the next call could cross a cap (estimated from the previous call)."""
@@ -536,6 +624,22 @@ class NavigationLoop:
             projected_in > self.limits.max_tokens_in
             or self.usage.tokens_out >= self.limits.max_tokens_out
         )
+
+
+def page_cycle(pages: list[str]) -> tuple[int, int]:
+    """(period, repeats) of the longest run of one repeated block at the end of `pages`
+    (consecutive duplicates already collapsed), for periods 2..CYCLE_MAX_PERIOD."""
+    best = (0, 0)
+    for period in range(2, CYCLE_MAX_PERIOD + 1):
+        block = pages[-period:]
+        if len(block) < period:
+            break
+        repeats = 1
+        while pages[-period * (repeats + 1) : len(pages) - period * repeats] == block:
+            repeats += 1
+        if repeats > best[1]:
+            best = (period, repeats)
+    return best
 
 
 def _detail(result: ActionResult) -> str:
@@ -586,6 +690,7 @@ def render_view(view: StepView) -> str:
         [
             f"Goal: {view.goal}",
             f"Step {view.turn} of {view.max_steps} ({view.max_steps - view.turn} left after this).",
+            "Gates seen so far: " + ("; ".join(view.gates) or "none"),
             "Your recent actions and their results (element names come from the page):",
             untrusted("recent_actions", history, 4000),
             view.state.render(),

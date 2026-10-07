@@ -5,7 +5,7 @@ import pytest
 from scamhunter.agent.identity import new_identity
 from scamhunter.agent.policy import LoopDetector, Policy, registrable
 from scamhunter.browser.elements import Element
-from scamhunter.browser.page_state import PageFacts
+from scamhunter.browser.page_state import CaptchaWidget, PageFacts
 from scamhunter.models import ActionType, AgentAction, BlockedReason
 
 IDENTITY = new_identity("abc123@mail.test")
@@ -356,3 +356,63 @@ def test_other_file_inputs_are_never_used() -> None:
 def test_links_stay_on_the_site(href: str, allowed: bool) -> None:
     d = decide(act(ActionType.CLICK, element_id=1), [el(1, "link", "Claim bonus", href=href)])
     assert d.allowed is allowed
+
+
+# ---------- CAPTCHA: one checkbox click, never a challenge (DESIGN §7, 2026-10-06) ----------
+
+RECAPTCHA = CaptchaWidget("recaptcha_checkbox", (10, 200, 300, 80))
+CHALLENGE = CaptchaWidget("challenge", (10, 300, 300, 400))
+
+
+def test_one_click_on_a_checkbox_captcha_then_a_gate() -> None:
+    policy = Policy(SITE, IDENTITY)
+    page = facts(captcha=(RECAPTCHA,))
+    at = act(ActionType.CLICK_AT, x=40, y=240)
+    assert policy.check(at, [], page).allowed
+    again = policy.check(at, [], page)
+    assert not again.allowed and again.blocked_at == BlockedReason.CAPTCHA
+    assert "done with blocked_at captcha" in again.reason
+
+
+def test_an_element_inside_the_widget_counts_as_the_widget() -> None:
+    policy = Policy(SITE, IDENTITY)
+    page = facts(captcha=(RECAPTCHA,))
+    box = el(3, "clickable", "☐", box=(20, 220, 20, 20))
+    assert policy.check(act(ActionType.CLICK, element_id=3), [box], page).allowed
+    second = policy.check(act(ActionType.CLICK, element_id=3), [box], page)
+    assert second.blocked_at == BlockedReason.CAPTCHA
+
+
+def test_a_challenge_is_never_touched() -> None:
+    policy = Policy(SITE, IDENTITY)
+    page = facts(captcha=(RECAPTCHA, CHALLENGE), captcha_challenge=True)
+    for x, y in ((40, 240), (100, 500)):  # the checkbox and the image grid
+        d = policy.check(act(ActionType.CLICK_AT, x=x, y=y), [], page)
+        assert not d.allowed and d.blocked_at == BlockedReason.CAPTCHA
+    assert policy.captcha_clicks == 0
+
+
+@pytest.mark.parametrize("kind", ["hcaptcha", "slider"])
+def test_other_captcha_kinds_are_gates(kind: str) -> None:
+    page = facts(captcha=(CaptchaWidget(kind, (10, 200, 300, 80)),))
+    d = decide(act(ActionType.CLICK_AT, x=40, y=240), page=page)
+    assert not d.allowed and d.blocked_at == BlockedReason.CAPTCHA
+
+
+def test_captcha_by_label_when_the_widget_is_not_detected() -> None:
+    policy = Policy(SITE, IDENTITY)
+    robot = el(1, "clickable", "I'm not a robot")
+    assert policy.check(act(ActionType.CLICK, element_id=1), [robot], facts()).allowed
+    d = policy.check(act(ActionType.CLICK, element_id=1), [robot], facts())
+    assert d.blocked_at == BlockedReason.CAPTCHA
+
+
+def test_captcha_fields_are_never_filled() -> None:
+    field = el(1, "textbox", "Enter the captcha")
+    d = decide(act(ActionType.FILL, element_id=1, value="abcd"), [field])
+    assert not d.allowed and d.blocked_at == BlockedReason.CAPTCHA
+
+
+def test_clicks_outside_the_widget_are_unaffected() -> None:
+    page = facts(captcha=(RECAPTCHA,))
+    assert decide(act(ActionType.CLICK, element_id=1), [el(1, "button", "Register")], page).allowed
