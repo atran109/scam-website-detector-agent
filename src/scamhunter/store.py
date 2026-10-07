@@ -22,6 +22,7 @@ def run_dir(run_id: str) -> Path:
 
 
 def write_jsonl(path: Path, records: Iterable[BaseModel]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)  # e.g. runs/<id>/triage_extra/ on a resume
     with path.open("w") as f:
         for record in records:
             f.write(record.model_dump_json() + "\n")

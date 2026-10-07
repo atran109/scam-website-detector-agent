@@ -132,3 +132,15 @@ def test_run_refuses_an_existing_run_directory_without_resume(
     )
     assert cli.cmd_run(args) == 1
     assert "already holds a run" in capsys.readouterr().err
+
+
+def test_write_jsonl_creates_the_missing_directory(tmp_path: Path) -> None:
+    """`run --resume` on a run directory without `triage_extra/` crashed on 2026-10-07."""
+    from scamhunter.models import SiteStatus, TriageRecord, TriageResult
+    from scamhunter.store import write_jsonl
+
+    site = Site(site_id="055", url="https://x.test", host="x.test", registrable_domain="x.test")
+    record = TriageRecord(site=site, triage=TriageResult(status=SiteStatus.LIVE, elapsed_ms=1))
+    target = tmp_path / "triage_extra" / "triage.jsonl"
+    write_jsonl(target, [record])
+    assert target.read_text().count("\n") == 1
