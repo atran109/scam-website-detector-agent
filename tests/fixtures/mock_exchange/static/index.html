@@ -114,9 +114,16 @@ const VIEWS = {
       return `<h2>Trade crypto, earn daily</h2><p>AI Quant trading. Follow top traders.</p>` +
         `<p><a href="${app}">Login</a></p><p><a href="https://t.me/mockex_support">Telegram support</a></p>`;
     }
+    let start = "";
+    if (F.self_redirect && location.hostname !== "localhost") {
+      // pilot site 071: a timer and a button with no href take the visitor to another site
+      const away = () => { location.href = `${location.protocol}//localhost:${location.port}/#/promo`; };
+      if (!S.redirectArmed) { S.redirectArmed = true; setTimeout(away, 3000); }
+      start = B("home_start", "Start", away);
+    }
     const auth = S.token ? B("home_assets", "Assets", () => go("assets"))
       : B("home_login", "Login", () => go("login")) + B("home_register", "Register", () => go("register"));
-    return `<h2>Trade crypto, earn daily</h2><p>AI Quant trading. Follow top traders.</p>${inj}${auth}`;
+    return `<h2>Trade crypto, earn daily</h2><p>AI Quant trading. Follow top traders.</p>${inj}${start}${auth}`;
   },
   info() { return `<h2>MockEx</h2><p>${esc(S.msg)}</p>`; },
   register() {

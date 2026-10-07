@@ -79,6 +79,7 @@ SOLVABLE_VARIANTS = (
     "amount_first",
     "injection",
     "app_domain",  # the app is on a second domain: one confirmed hop (DESIGN §5.5)
+    "self_redirect",  # the home page sends visitors off-site by itself: the route guard stops it
 )
 GATED_VARIANTS: dict[str, BlockedReason] = {
     "invite_required": BlockedReason.INVITE_CODE,

@@ -21,7 +21,7 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 
 from playwright.async_api import Error as PlaywrightError
-from playwright.async_api import Page
+from playwright.async_api import Page, Route
 
 from scamhunter.agent.identity import (
     MailMessage,
@@ -165,25 +165,32 @@ class AgentRun:
     call_usage: list[dict[str, int]] = field(default_factory=list)  # API usage per step
 
 
-# EVM target assets by the coin named beside an EVM address on a deposit page. An EVM address shown
-# for USDT or USDC counts as the ERC-20 one (the targets' only EVM network; the same address also
-# works on BEP-20, which is not a target). Case-sensitive tickers, so "eth" in a word is not ETH.
-_EVM_COIN = {
-    "ETH": re.compile(r"(?<![A-Za-z])ETH(?![A-Za-z])|\bEthereum \(ETH\)"),
-    "USDT-ERC20": re.compile(r"(?<![A-Za-z])USDT"),
-    "USDC-ERC20": re.compile(r"(?<![A-Za-z])USDC"),
-}
-NEAR_ADDRESS_CHARS = 300
+# The coin and network a deposit-page control names ("USDT", "TRC20", "Tether (USDT - ERC20)",
+# "Ethereum (ETH)"). Used to know which asset an address was shown for.
+_COIN = re.compile(
+    r"(?<![A-Za-z])(USDT|USDC|BTC|ETH|TRX|BNB)(?![A-Za-z])|\b(Bitcoin|Ethereum|Tron)\b"
+)
+_NETWORK = re.compile(r"(?<![A-Za-z])(TRC-?20|ERC-?20|BEP-?20|BSC|OMNI)(?![A-Za-z0-9])", re.I)
+_COIN_NAMES = {"BITCOIN": "BTC", "ETHEREUM": "ETH", "TRON": "TRX"}
 
 
-def evm_assets_named_near(text: str, address: str) -> set[str]:
-    """Target keys whose coin is named within NEAR_ADDRESS_CHARS of the address in the visible
-    text. Nothing if the address is not in the visible text (an attribute-only sighting)."""
-    at = text.lower().find(address.lower())
-    if at < 0:
-        return set()
-    window = text[max(0, at - NEAR_ADDRESS_CHARS) : at + len(address) + NEAR_ADDRESS_CHARS]
-    return {key for key, coin in _EVM_COIN.items() if coin.search(window)}
+def coin_and_network(label: str) -> tuple[str | None, str | None]:
+    coin = _COIN.search(label)
+    network = _NETWORK.search(label)
+    name = (coin.group(1) or _COIN_NAMES[coin.group(2).upper()]) if coin else None
+    net = network.group(1).upper().replace("-", "") if network else None
+    return name, net
+
+
+def evm_key_for_selection(coin: str | None, network: str | None) -> str | None:
+    """The EVM target asset an EVM address counts for, given the coin the agent had selected
+    when it appeared: ETH → ETH; USDT/USDC on ERC-20 (or no network named) → the ERC-20 target.
+    Another network (BEP-20, TRC-20) or another coin counts nothing."""
+    if coin == "ETH" and network in (None, "ERC20"):
+        return "ETH"
+    if coin in ("USDT", "USDC") and network in (None, "ERC20"):
+        return f"{coin}-ERC20"
+    return None
 
 
 def asset_keys(address: CryptoAddress) -> set[str]:
@@ -317,6 +324,8 @@ class NavigationLoop:
         self.pages: list[str] = []  # URLs seen, consecutive repeats collapsed
         self._cycle_warned: set[int] = set()
         self.cycle_warning_steps: list[int] = []  # for the trace: did the warning fire, and when
+        self.selected_coin: str | None = None  # last coin chosen on a deposit page (click/select)
+        self.selected_network: str | None = None
         self.password_submitted = False
         self.confirm_password_submitted = False
         self.logged_in = False
@@ -337,6 +346,8 @@ class NavigationLoop:
         self.progress = progress
         self._user_stopped = False
         self._paused = 0.0
+        self.blocked_navigations: list[str] = []  # off-site page loads the route guard stopped
+        self._blocked_reported = 0
         self._filled = False
         self._submit_confirmed = False
 
@@ -344,6 +355,42 @@ class NavigationLoop:
 
     async def run(self) -> AgentRun:
         self._started = time.time()
+        context = self.page.context
+        await context.route("**/*", self._navigation_guard)
+        try:
+            return await self._run()
+        finally:
+            try:
+                await context.unroute("**/*", self._navigation_guard)
+            except PlaywrightError:
+                pass
+
+    async def _navigation_guard(self, route: Route) -> None:
+        """Abort a top-level page load on another registrable domain before any request goes out
+        (2026-10-07, pilot site 071: a timer and a button with no href loaded two other sites
+        before the loop could undo them). Only main-frame navigations of any tab are checked;
+        subresources and iframes pass. The allowed domain is the policy's, so it follows a
+        confirmed hop. Server-side redirects may bypass routing (LOG 2026-10-06), so the
+        after-the-fact check with `back` in `_execute` stays."""
+        request = route.request
+        parts = urlparse(request.url)
+        if (
+            request.is_navigation_request()
+            and request.frame.parent_frame is None
+            and parts.scheme in ("http", "https")
+            and parts.hostname
+            and registrable(parts.hostname) != self.policy.site_domain
+        ):
+            self.blocked_navigations.append(request.url[:500])
+            self._note_linked(request.url)
+            log.info("navigation guard blocked %s", request.url[:200])
+            # A 204 answer cancels a navigation and leaves the current page as it is (an abort
+            # would commit an error page and lose the app's state); nothing reaches the network.
+            await route.fulfill(status=204, body="")
+            return
+        await route.fallback()  # next handler (mock mode's loopback guard), else the network
+
+    async def _run(self) -> AgentRun:
         steps = asyncio.create_task(self._steps())
         watchdog = asyncio.create_task(self._watchdog(steps))
         try:
@@ -655,7 +702,15 @@ class NavigationLoop:
             action = action.model_copy(
                 update={"value": resolve_placeholders(action.value, self.identity)}
             )
+        blocked_before = len(self.blocked_navigations)
         result = await perform(self.page, action, state.elements)
+        if len(self.blocked_navigations) > blocked_before:
+            self._blocked_reported = len(self.blocked_navigations)
+            url = self.blocked_navigations[-1]
+            await self._back_if_off_site()
+            return ActionResult(
+                False, "blocked_navigation", f"it tried to load {url[:120]} (another site); stopped"
+            )
         if result.ok and not self._on_site():
             left_to = self.page.url
             try:
@@ -681,6 +736,14 @@ class NavigationLoop:
                 await self.page.wait_for_timeout(MAILBOX_POLL_SECONDS * 1000)
         return ActionResult(True, "no_mail", "the mailbox has no new message")
 
+    async def _back_if_off_site(self) -> None:
+        """Backup for the guard: if a stopped navigation still left an error page, go back."""
+        if not self._on_site():
+            try:
+                await self.page.go_back(wait_until="domcontentloaded")
+            except PlaywrightError:
+                pass
+
     def _on_site(self) -> bool:
         url = self.page.url
         if url.startswith("chrome-error://"):
@@ -700,6 +763,8 @@ class NavigationLoop:
             steps_left=self.limits.max_steps - turn + 1,
             seconds_left=max(0, int(self.limits.max_seconds - self._elapsed())),
         )
+        if len(self.blocked_navigations) > self._blocked_reported:
+            await self._back_if_off_site()  # before observing, so the agent sees the real page
         state = await observe(self.page, stage, coverage)
         where = urlparse(state.url)
         path = (where.path or "/") + (f"#{where.fragment}" if where.fragment else "")
@@ -708,6 +773,11 @@ class NavigationLoop:
             self._note_gate(BlockedReason.CAPTCHA, f"CAPTCHA {shown} on {path[:40]}")
         for gate in gate_hints(state.text):
             self._note_gate(gate, f"page text on {path[:40]}")
+        for url in self.blocked_navigations[self._blocked_reported :]:
+            self.history.append(
+                f"{turn}. (the page tried on its own to load {url[:100]}, another site; stopped)"
+            )
+        self._blocked_reported = len(self.blocked_navigations)
         if not self.pages or self.pages[-1] != state.url:
             self.pages.append(state.url)
         if state.facts.is_deposit_page:
@@ -762,22 +832,37 @@ class NavigationLoop:
         if action.type == ActionType.CLICK and element and state.facts.is_deposit_page:
             if COIN_OR_NETWORK.search(element.name) and element.name not in self.assets_tried:
                 self.assets_tried.append(element.name[:40])
+        chosen = None
+        if action.type == ActionType.CLICK and element and state.facts.is_deposit_page:
+            chosen = element.name
+        elif action.type == ActionType.SELECT and state.facts.is_deposit_page:
+            chosen = action.value or ""
+        if chosen:
+            coin, network = coin_and_network(chosen)
+            if coin:
+                self.selected_coin, self.selected_network = coin, network
+            elif network:
+                self.selected_network = network
 
     def _count_shared_evm(self, turn: int) -> None:
         """One EVM address often serves ETH and every ERC-20 token. Each time a deposit page
-        shows a primary EVM address, the EVM target assets named next to it on that page count
-        as found (2026-10-07: pilot site 012 showed one address for ETH, USDT and USDC, but its
-        labels stayed at 0.4, so coverage never counted them and the agent kept cycling)."""
+        shows a primary EVM address in its text, the EVM asset the agent had selected counts as
+        found (2026-10-07: pilot site 012 showed one address for ETH, USDT and USDC, its labels
+        stayed at 0.4, so coverage never counted them and the agent kept cycling)."""
         if self.evidence.last_stage != DiscoveryStage.DEPOSIT_PAGE:
             return
+        key = evm_key_for_selection(self.selected_coin, self.selected_network)
+        if key is None or key not in self.limits.target_assets:
+            return
+        text = self.evidence.last_text.lower()
         for address in self.evidence.last_found:
             if address.tier != AddressTier.PRIMARY or address.format != AddressFormat.EVM:
                 continue
-            keys = evm_assets_named_near(self.evidence.last_text, address.address)
-            keys &= set(self.limits.target_assets)
-            if keys and self.first_address_turn is None:
+            if address.address.lower() not in text:  # an attribute-only sighting is not "shown"
+                continue
+            if self.first_address_turn is None:
                 self.first_address_turn = turn
-            self.found |= keys
+            self.found.add(key)
         if self.full_coverage_turn is None and set(self.limits.target_assets) <= self.found:
             self.full_coverage_turn = turn
 

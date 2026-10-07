@@ -184,16 +184,17 @@ def test_cycle_warning_is_shown_once_and_recorded_with_its_step() -> None:
     assert loop._page_cycle(13)
 
 
-def test_a_shared_evm_address_covers_the_evm_coins_named_beside_it() -> None:
-    """Pilot site 012's payment page (one EVM address for ETH, USDT and USDC)."""
-    from scamhunter.agent.loop import evm_assets_named_near
+def test_a_shared_evm_address_counts_for_the_coin_selected_when_it_appeared() -> None:
+    """Pilot site 012's dropdown options and the mock's coin and network chips."""
+    from scamhunter.agent.loop import coin_and_network, evm_key_for_selection
 
-    addr = "0x76b10e09316c4c36c13bdb8b834953edb01659dc"
-    usdt = f"Payment ID: DEP-1\n100.000000 USDTERC20\n$100.00\nPayment Address:\n{addr}\nPaid"
-    assert evm_assets_named_near(usdt, addr) == {"USDT-ERC20"}
-    eth = f"Payment Details\n0.0305 ETH\nPayment Address:\n{addr}"
-    assert evm_assets_named_near(eth, addr) == {"ETH"}
-    assert evm_assets_named_near("Ethereum network fees apply. Send to " + addr, addr) == set()
-    assert evm_assets_named_near("no address here 100 USDT", addr) == set()
-    far = "USDT " + "x" * 400 + addr
-    assert evm_assets_named_near(far, addr) == set()  # coin named, but not next to it
+    assert coin_and_network("Tether (USDT - ERC20)") == ("USDT", "ERC20")
+    assert coin_and_network("Ethereum (ETH)") == ("ETH", None)
+    assert coin_and_network("USDC (USD Coin)") == ("USDC", None)
+    assert coin_and_network("TRC20") == (None, "TRC20")
+    assert evm_key_for_selection("USDT", "ERC20") == "USDT-ERC20"
+    assert evm_key_for_selection("ETH", None) == "ETH"
+    assert evm_key_for_selection("USDC", None) == "USDC-ERC20"
+    assert evm_key_for_selection("USDT", "BEP20") is None  # another EVM network: not a target
+    assert evm_key_for_selection("USDT", "TRC20") is None
+    assert evm_key_for_selection("BTC", None) is None
