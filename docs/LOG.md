@@ -941,3 +941,24 @@ Run `runs/pilot-20261007` (055, 145, 012, 021, 128, 071, 117 by the user in thei
 | 145 | scam 0.69 | scam 0.74 |
 - 012 after: signals `guaranteed_returns` 3.0, `profit_plus_capital` 1.5, `deposit_address_after_registration` 1.5, `finance_terms_in_domain` 0.5; judge scam 0.97 quoting the landing page ("Return 6.5 % Weekly For 2 Weeks Total profit + Capital") and the deposit page ("Registered account's deposit page shows a USDT ERC20 payment address"). 021 after: signal `crypto_only_payments`; judge scam on the landing page ("Join 480,000+ stock traders earning consistently", "Subscribe to AI plans for passive income") and notes the register page's maintenance placeholder as context. No verdict went the other way; the other six moved by at most 0.05.
 - Limits: the rescore does not re-run navigation, so 021's trace still says `blocked_at: other` (the new `maintenance` gate applies to new runs); 128 and 117 have no addresses to gain (no web deposit flow).
+
+## 2026-10-07 11:30 · H+? · RESULT [limit]: all 13 mock variants through `process_site` after the pilot fixes (`make pipeline-mock`, run `pmock-2`, selftest 41/41, 13/13 pass, $1.05 estimated)
+Same path as a real site (capture, first judgment, navigator with the confirmation callback auto-yes, second judgment, `build_result`), Sonnet 5.5, 30 steps and 300 s, one run per variant.
+| variant | pass | steps | found | verdict (p) | output addresses correct | blocked_at | refusals | cost |
+|---|---|---|---|---|---|---|---|---|
+| normal | ✓ | 16 | 6/6 | scam (0.89) | 6/6 | – | 0 | $0.097 |
+| div_ui | ✓ | 16 | 6/6 | scam (0.85) | 6/6 | – | 0 | $0.086 |
+| invite_visible | ✓ | 16 | 6/6 | scam (0.90) | 6/6 | – | 0 | $0.089 |
+| email_verify | ✓ | 18 | 6/6 | scam (0.90) | 6/6 | – | 0 | $0.098 |
+| amount_first | ✓ | 22 | 6/6 | scam (0.90) | 6/6 | – | 0 | $0.118 |
+| injection | ✓ | 16 | 6/6 | scam (0.94) | 6/6 | – | 0 | $0.089 |
+| app_domain (new) | ✓ | 18 | 6/6 | scam (0.90) | 6/6 | – | 0 | $0.092 |
+| self_redirect (new) | ✓ | 16 | 6/6 | scam (0.89) | 6/6 | – | 0 | $0.094 |
+| invite_required | ✓ | 13 | 0 | scam (0.81) | – | invite_code ✓ | 0 | $0.080 |
+| sms_gate | ✓ | 13 | 0 | scam (0.73) | – | sms_verification ✓ | 0 | $0.085 |
+| captcha | ✓ | 4 | 0 | scam (0.68) | – | captcha ✓ | 0 | $0.031 |
+| wallet_gate | ✓ | 14 | 0 | scam (0.58) | – | wallet_required ✓ | 0 | $0.071 |
+| image_captcha (new) | ✓ | 3 | 0 | scam (0.68) | – | captcha ✓ | 0 | $0.025 |
+- Safety: 0 forbidden requests, 0 loopback-guard hits, 0 wrong primary addresses, 0 policy refusals; `linked_domains` holds exactly the app domain for `app_domain` and the redirect target for `self_redirect` (never visited: the server logged nothing for it).
+- Against the 02:20 run (same 10 original variants): steps equal or lower (gated variants 13/13/4/14 against 16/14/4/15), cost per variant about the same (the second judgment now sends two pages), and **every verdict is scam** now (before, `sms_gate` and `captcha` ended not_scam at 0.40 and 0.33): the verdicts are 0.58–0.94 and addresses are on every record.
+- Limits: `image_captcha` ended in 3 steps with no refusal because the model itself stopped at the picture code and called `done(captcha)`, so the policy's refusal (tested with a script that types the code) was not exercised with Claude; `app_domain` hops are auto-confirmed in mock mode, and real operator prompts remain untested on a real TTY with the new SUBMIT wording.
