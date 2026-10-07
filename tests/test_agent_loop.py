@@ -166,3 +166,19 @@ def test_gates_seen_are_in_the_step_message() -> None:
     assert "Gates seen so far: none" in render_view(v)
     gated = StepView(GOAL, v.state, [], 4, 35, ["captcha (CAPTCHA widget on /#/register)"])
     assert "Gates seen so far: captcha (CAPTCHA widget on /#/register)" in render_view(gated)
+
+
+def test_cycle_warning_is_shown_once_and_recorded_with_its_step() -> None:
+    from scamhunter.agent.loop import NavigationLoop
+
+    loop = NavigationLoop(None, None, None, None, None, "goal")  # type: ignore[arg-type]
+    cycle = ["/#/register", "/#/home", "/#/login"]
+    loop.pages = ["/"] + cycle * 2
+    assert not loop._page_cycle(7) and loop.cycle_warning_steps == []  # two repeats: quiet
+    loop.pages += cycle  # third repeat: warn
+    assert not loop._page_cycle(10)
+    assert loop.cycle_warning_steps == [10]
+    assert "WARNING: you have gone through the same 3 pages 3 times" in loop.history[-1]
+    assert not loop._page_cycle(11) and loop.cycle_warning_steps == [10]  # only once per period
+    loop.pages += cycle  # fourth repeat: stop
+    assert loop._page_cycle(13)

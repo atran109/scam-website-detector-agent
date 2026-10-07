@@ -108,6 +108,7 @@ Adjust the hours to the real schedule.
 - [x] Give-up rule: stop a site after 4 consecutive failed steps (`max_consecutive_failures`) (step D)
 - [ ] Disposable email: **mail.tm** (decided 2026-10-05); API token held in memory only, never logged or written to disk; mail traffic goes through the egress proxy; if the verification email never arrives, record `blocked_at: email_verification` and move on
 - [x] Policy rules from the 2026-10-05 decisions (deposit amounts, deposit-page clicks, "I have paid"/receipt blocked, wallet clicks, text reply = failed step): DESIGN §5.5
+- [x] Mock exchange solved end to end by the real navigator (step E, 2026-10-06): 18/18 solvable runs, 12/12 gated runs ending at the right `blocked_at`, zero policy refusals, nothing forbidden (LOG 2026-10-06 20:55). The wall-clock limit, CAPTCHA one-click policy and `linked_domains` came out of it
 - [ ] Mock wallet (`window.ethereum`) via init script, logging requested recipients: **deferred until after the pilot, not cut.** Tally wallet-gated sites (`blocked_at: wallet_required`) in the pilot; build it if there are several. Connect-wallet clicks become allowed once it exists (sign/approve stay blocked)
 - [ ] Smaller step budget for `fake_shop` (e.g. 12 instead of 25), set in `agent` settings
 - [ ] Pilot on 10-20 real sites; **tally failure causes**. If element-finding dominates, time-box a 1-2h Stagehand `ElementProvider` trial
@@ -132,6 +133,7 @@ Adjust the hours to the real schedule.
 
 - [ ] Container: read-only root filesystem (`cap_drop`, `no-new-privileges` and limits already done in M1)
 - [ ] Re-run `make selftest`; review `egress.log` for anything unexpected
+- [ ] Replace the nip.io DNS-rebinding probe with a DNS-independent test (a local resolver that returns a link-local IP for a test name; assert the proxy refuses it); an inconclusive result must fail closed for real-site runs (moved here from "must do before step F", LOG 2026-10-06 21:06)
 - [ ] Verify the Chromium sandbox is on inside the container (no silent `--no-sandbox`)
 - [ ] Browser: block non-http(s) schemes and service workers; close popups; no extensions
 - [ ] LLM: page content wrapped as untrusted data; structured outputs validated

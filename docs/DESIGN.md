@@ -158,7 +158,8 @@ scam-website-detector-agent/
 │
 ├── eval/
 │   ├── labels.csv               # hand-labeled sample (ground truth)
-│   └── evaluate.py              # precision/recall on verdicts + addresses
+│   ├── evaluate.py              # precision/recall on verdicts + addresses
+│   └── live_tally.py            # live sites bucketed by where the address sits (saved evidence only)
 │
 ├── tests/
 │   ├── fixtures/
@@ -546,6 +547,7 @@ class NavigationTrace(BaseModel):
     reached_deposit: bool
     assets_tried: list[str]        # coins/networks selected on deposit page
     linked_domains: list[str] = [] # refused or undone target URLs on other sites (2026-10-06)
+    cycle_warning_steps: list[int] = []  # steps where the page-cycle warning was shown (2026-10-06)
 
 # ---------- Result ----------
 class SiteResult(BaseModel):

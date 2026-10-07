@@ -10,6 +10,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - Addresses: TODO(M6) primary addresses on TODO(M6) sites; TODO(M6) found only behind registration.
 - Accuracy on hand labels: precision TODO(M6) / recall TODO(M6) at threshold 0.45, and at 0.5 TODO(M6).
 - Navigation on real sites: reached a deposit page on TODO(M6) of TODO(M6) attempted; `blocked_at` tally TODO(M6).
+- Live-site structure (13 of 56 live sites with saved HTML; pilot-5): TODO(M6) full tally; so far 2 address on landing, 6 registration-gated, 1 wallet-gated, 4 unclear.
 - Mock exchange (M3 step E, Sonnet 5.5): 18/18 solvable runs found all six addresses (first by step 9, all by step 21); gated variants 12/12 after the CAPTCHA and history fixes (10/12 before); zero policy refusals; about $2.4 per 30-run batch.
 - Cost: TODO(M6) total, TODO(M6) per site (judge ≈ $0.012/call; navigator ≈ $0.07–0.15 per mock run).
 - Confidence: `scam_probability` ≥ 0.45 ⇒ scam (leans toward recall); `confidence` = P(stated verdict correct), so 0.45–0.5 is "scam" with confidence < 0.5, which marks the shaky verdicts.
@@ -45,7 +46,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - Prompt-injection defence in code: nonce-delimited untrusted blocks, and a policy that ignores what the model "wants".
 
 ## With more time
-- Mock wallet (`window.ethereum` that refuses to sign) once wallet-gated sites are counted in the pilot.
+- Mock wallet (`window.ethereum` that refuses to sign) once wallet-gated sites are counted (1 of 13 saved live sites so far; decision pending the pilot tally).
 - Stagehand `ElementProvider` trial if element finding dominates the pilot's failure tally.
 - Residential/regional proxies to separate geo-blocking from dead sites.
 - Domain/content mismatch signal; mobile-exchange template signal; dead-site rule (a)/(b) decided from live-site base rates.
@@ -64,7 +65,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 
 ## Safety
 - Crawler in hardened Docker (non-root, no capabilities, seccomp, Chromium sandbox on, downloads off), internal network only; egress via Squid that denies private/link-local/loopback by resolved IP and logs every request.
-- `make selftest` must pass before any real visit (41 checks). A mock-only waiver exists for one DNS-filtered network; real-site runs keep the full gate. TODO: DNS-independent rebinding probe before step F.
+- `make selftest` must pass before any real visit (41 checks); real-site runs fail to start if any check fails. A mock-only waiver exists for one DNS-filtered network; the DNS-independent rebinding probe is an M5 hardening item.
 - API key only in the gateway container; the crawler talks to the gateway, which talks only to api.anthropic.com.
 - Agent policy in code: never pay, sign, withdraw, claim a payment, upload receipts or IDs, connect a wallet (until a mock wallet exists), or leave the site; placeholders only for personal data (synthetic identity, 555 phone numbers).
 - CAPTCHAs: at most one click on a checkbox widget (reCAPTCHA checkbox, Turnstile); any challenge or a remaining gate ends the site with `blocked_at: captcha`; enforced in code; never solved via services.

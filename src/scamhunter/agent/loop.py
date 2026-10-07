@@ -270,6 +270,7 @@ class NavigationLoop:
         self.linked: list[str] = []  # refused or undone targets on other sites
         self.pages: list[str] = []  # URLs seen, consecutive repeats collapsed
         self._cycle_warned: set[int] = set()
+        self.cycle_warning_steps: list[int] = []  # for the trace: did the warning fire, and when
         self.password_submitted = False
         self.confirm_password_submitted = False
         self.logged_in = False
@@ -312,6 +313,7 @@ class NavigationLoop:
             reached_deposit=self.reached_deposit,
             assets_tried=self.assets_tried,
             linked_domains=self.linked,
+            cycle_warning_steps=self.cycle_warning_steps,
         )
         log.info(
             "agent stopped: %s%s after %d steps, %d refusals, found %s",
@@ -553,6 +555,7 @@ class NavigationLoop:
             return True
         if repeats >= CYCLE_WARN and period not in self._cycle_warned:
             self._cycle_warned.add(period)
+            self.cycle_warning_steps.append(turn)
             self.history.append(
                 f"{turn}. WARNING: you have gone through the same {period} pages {repeats} times. "
                 "If a gate stops you, call done with blocked_at; otherwise try something different."

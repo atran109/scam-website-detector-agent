@@ -235,6 +235,7 @@ def run_summary(result: MockRun, model: str) -> dict[str, Any]:
         "cache_read_by_step": [u.get("cache_read_input_tokens", 0) for u in run.call_usage],
         "cost_usd": round(run.usage.cost_usd(model), 4),
         "seconds": round(run.seconds, 1),
+        "cycle_warning_steps": run.trace.cycle_warning_steps,
         "refusals": [f"step {r.turn}: {r.action} → {r.reason}" for r in run.refusals],
         "forbidden": result.forbidden,
         "blocked_urls": result.blocked_urls,

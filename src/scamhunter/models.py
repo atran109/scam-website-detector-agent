@@ -375,6 +375,7 @@ class NavigationTrace(BaseModel):
     reached_deposit: bool
     assets_tried: list[str]  # coins/networks selected on deposit page
     linked_domains: list[str] = []  # refused or undone target URLs on other sites
+    cycle_warning_steps: list[int] = []  # steps where the page-cycle warning was shown to the model
 
 
 # ---------- Result ----------
