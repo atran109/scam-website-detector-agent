@@ -189,9 +189,72 @@ def test_literals_that_look_like_personal_data_are_blocked(value: str) -> None:
     assert not fill(value, el(1, "textbox", "Invite code")).allowed
 
 
-@pytest.mark.parametrize("value", ["ABC123", "888888", "USDT", "TRC20"])
-def test_short_literals_such_as_invite_codes_are_allowed(value: str) -> None:
-    assert fill(value, el(1, "textbox", "Invite code")).allowed
+# ---------- the literal-value rule (2026-10-07: pilot site 145 typed an image CAPTCHA) ----------
+
+INVITE = el(1, "textbox", "Invite code")
+
+
+@pytest.mark.parametrize("value", ["ABC123", "888888", "USDT", "TRC20", "KG08", "hello"])
+def test_a_literal_from_no_known_source_is_refused(value: str) -> None:
+    d = fill(value, INVITE)
+    assert not d.allowed and "not from a known source" in d.reason
+
+
+def test_an_invitation_code_printed_on_the_page_may_be_typed() -> None:
+    page = facts(printed_codes=("8888",))
+    assert fill("8888", INVITE, page).allowed
+    assert not fill("8889", INVITE, page).allowed  # never a guessed variant
+
+
+def test_a_code_from_the_site_s_email_may_be_typed() -> None:
+    policy = Policy(SITE, IDENTITY)
+    code = el(1, "textbox", "Verification code")
+    action = act(ActionType.FILL, element_id=1, value="482913")
+    assert not policy.check(action, [code], facts()).allowed
+    policy.add_code("482913")
+    assert policy.check(action, [code], facts()).allowed
+
+
+def test_placeholders_with_spaces_need_no_source() -> None:
+    assert fill("{identity.first_name} {identity.last_name}", el(1, "textbox", "Name")).allowed
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "圖形驗證碼",
+        "图形验证码",
+        "图片验证码",
+        "Enter the characters shown",
+        "Captcha",
+        "Image code",
+    ],
+)
+def test_unambiguous_captcha_labels_are_captcha_fields(label: str) -> None:
+    d = fill("KG08", el(1, "textbox", label))
+    assert not d.allowed and d.blocked_at == BlockedReason.CAPTCHA
+
+
+@pytest.mark.parametrize("label", ["請輸入驗證碼", "邮箱验证码", "Verification code"])
+def test_a_plain_verification_code_label_is_not_a_captcha_by_itself(label: str) -> None:
+    """Sites use the same words for email and SMS codes, so the label alone does not decide;
+    an emailed code may still be typed there."""
+    policy = Policy(SITE, IDENTITY)
+    policy.add_code("53687")
+    action = act(ActionType.FILL, element_id=1, value="53687")
+    assert policy.check(action, [el(1, "textbox", label)], facts()).allowed
+
+
+def test_a_field_inside_an_image_captcha_widget_is_never_filled() -> None:
+    """The image-next-to-input rule: the widget box covers the input (pilot site 145)."""
+    from scamhunter.browser.page_state import CaptchaWidget
+
+    page = facts(captcha=(CaptchaWidget("image_text", (0, 0, 300, 40)),), captcha_challenge=True)
+    field = el(1, "textbox", "請輸入驗證碼", box=(10, 5, 150, 30))
+    policy = Policy(SITE, IDENTITY)
+    policy.add_code("KG08")  # even a "known" value: a CAPTCHA field is never filled
+    d = policy.check(act(ActionType.FILL, element_id=1, value="KG08"), [field], page)
+    assert not d.allowed and d.blocked_at == BlockedReason.CAPTCHA
 
 
 @pytest.mark.parametrize(

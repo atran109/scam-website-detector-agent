@@ -19,7 +19,6 @@ from scamhunter.classify.domain import BrandToken, real_brand_domain
 from scamhunter.models import ActionType, AgentAction, BlockedReason, Identity
 
 DEFAULT_DEPOSIT_AMOUNT = "100"
-MAX_LITERAL_CHARS = 40
 MAX_COORDINATE = 4000
 
 _extract = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
@@ -90,9 +89,14 @@ KYC_UPLOAD = re.compile(
     re.I,
 )
 # A CAPTCHA control the widget detector may miss (custom wrappers): judged by its label.
+# A plain "验证码 / verification code" is not on this list: sites use it for email and SMS codes
+# too. An image CAPTCHA is caught by the image-next-to-input rule (page_state) and, as the main
+# guard, by the literal-value rule in `_text`.
 CAPTCHA_LABEL = re.compile(
-    r"i'?m not a robot|i am not a robot|verify (?:you are|you're) human|\bcaptcha\b|recaptcha"
-    r"|turnstile|hcaptcha|人机验证",
+    r"i'?m not a robot|i am not a robot|verify (?:you are|you're) human|captcha|recaptcha"
+    r"|turnstile|hcaptcha|人机验证|人機驗證|圖形驗證|图形验证|圖片驗證|图片验证|圖形碼|图形码"
+    r"|enter the (?:characters|code|text) (?:shown|in the (?:image|picture))|image code"
+    r"|picture code|verification image|security image",
     re.I,
 )
 AMOUNT_FIELD = re.compile(r"amount|quantity|金额|\bsum\b", re.I)
@@ -176,6 +180,11 @@ class Policy:
         self.identity = identity
         self.mock_wallet_active = mock_wallet_active  # connect-wallet clicks need it (§5.5)
         self.captcha_clicks = 0  # at most one, on a checkbox-style widget (DESIGN §7)
+        self.known_codes: set[str] = set()  # codes the site sent by email (check_email)
+
+    def add_code(self, code: str) -> None:
+        """A code from an email the site sent: it may be typed (the literal-value rule)."""
+        self.known_codes.add(code.strip())
 
     def check(self, action: AgentAction, elements: list[Element], facts: PageFacts) -> Decision:
         kind = action.type
@@ -341,7 +350,7 @@ class Policy:
             return _kyc_block()
         if AMOUNT_FIELD.search(label):
             return self._amount(value, facts)
-        return self._text(element, value)
+        return self._text(element, value, facts)
 
     def _amount(self, value: str, facts: PageFacts) -> Decision:
         if not facts.is_deposit_page:
@@ -355,7 +364,7 @@ class Policy:
             return _block(f"type exactly {allowed} in the amount field (the page's minimum)")
         return ALLOW
 
-    def _text(self, element: Element, value: str) -> Decision:
+    def _text(self, element: Element, value: str, facts: PageFacts) -> Decision:
         names = placeholders_in(value)
         for name in names:
             if name not in FIELDS:
@@ -370,15 +379,22 @@ class Policy:
             return _block("password fields take only {identity.password}")
         if "password" in names and not is_password and "password" not in _label(element).lower():
             return _block("{identity.password} goes only into a password field")
-        if len(literal) > MAX_LITERAL_CHARS:
-            return _block(f"literal text is limited to {MAX_LITERAL_CHARS} characters")
         if "@" in literal:
             return _block("use {identity.email} for email addresses")
         digits = re.sub(r"\D", "", literal)
         if len(digits) >= 10 and len(digits) >= len(re.sub(r"\s", "", literal)) * 0.8:
             return _block("long numbers are not typed (use {identity.phone} for a phone number)")
-        if len(literal.split()) >= 6:
-            return _block("long phrases are not typed")
+        # The main guard (2026-10-07, pilot site 145 typed an image CAPTCHA's text): text that is
+        # not a placeholder must come from a known source. Amounts and dropdowns have their own
+        # rules (`_amount`, `_select`); everything else typed literally is refused.
+        typed = literal.strip()
+        if typed and typed not in self.known_codes and typed not in facts.printed_codes:
+            return _block(
+                f"{typed[:20]!r} is not from a known source: type only {{identity.<field>}} "
+                "placeholders, a code from check_email, or an invitation code printed on the page "
+                "(never text read from an image; a picture code is a CAPTCHA: call done with "
+                "blocked_at captcha)"
+            )
         return ALLOW
 
     def _select(self, element: Element, option: str) -> Decision:

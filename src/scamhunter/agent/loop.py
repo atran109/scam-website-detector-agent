@@ -23,7 +23,12 @@ from urllib.parse import urlparse
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Page
 
-from scamhunter.agent.identity import MailMessage, describe_message, resolve_placeholders
+from scamhunter.agent.identity import (
+    MailMessage,
+    describe_message,
+    extract_verification,
+    resolve_placeholders,
+)
 from scamhunter.agent.policy import Decision, LoopDetector, Policy, registrable
 from scamhunter.agent.tools import TOOLS, ParsedCall, ToolError, calls_after, pick_tool_calls
 from scamhunter.browser.capture import NetworkRecorder, load_snapshot_content, take_snapshot
@@ -640,6 +645,9 @@ class NavigationLoop:
         for attempt in range(MAILBOX_POLLS):
             message = await self.mailbox.next_message()
             if message is not None:
+                found = extract_verification(f"{message.subject}\n{message.body}")
+                if found.code:
+                    self.policy.add_code(found.code)  # typing it is allowed from now on
                 return ActionResult(True, "mail", describe_message(message.subject, message.body))
             if attempt < MAILBOX_POLLS - 1:
                 await self.page.wait_for_timeout(MAILBOX_POLL_SECONDS * 1000)

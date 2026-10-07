@@ -153,3 +153,13 @@ def test_captcha_challenge_from_iframe_or_wording() -> None:
     assert not compute_facts(
         "https://x.test/", "", [], "Select all images", [], LANDING
     ).captcha_challenge
+
+
+def test_printed_invitation_codes() -> None:
+    from scamhunter.browser.page_state import printed_invite_codes
+
+    assert printed_invite_codes("Token Contract ...\nInvite code: 8888") == ("8888",)
+    assert printed_invite_codes("邀请码：AB12 注册") == ("AB12",)
+    assert printed_invite_codes("Referral code is XKCD") == ("XKCD",)
+    assert printed_invite_codes("Invitation code\nRegister") == ()  # a label, then a word
+    assert printed_invite_codes("Invitation code (optional)") == ()

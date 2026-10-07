@@ -81,6 +81,10 @@ _CAPTCHA_JS = r"""
   ];
   const out = [];
   const seen = new Set();
+  const visible = el => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 2 && r.height >= 2 && el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true});
+  };
   for (const [kind, selector] of KINDS) {
     for (const el of document.querySelectorAll(selector)) {
       if (seen.has(el) || [...seen].some(s => s.contains(el))) continue;
@@ -90,6 +94,34 @@ _CAPTCHA_JS = r"""
       seen.add(el);
       out.push({kind, box: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]});
     }
+  }
+  // Image CAPTCHA (2026-10-07, pilot site 145): an <img>/<canvas> whose attributes say captcha or
+  // verification code, next to a text input. The widget's box covers both, so the input is a
+  // CAPTCHA field for the policy. "Next to": the nearest text input on the same row inside the
+  // image's container (up to 3 levels up).
+  const HINT = /captcha|verif|vcode|yzm|checkcode|authcode|validat|piccode|imgcode|kaptcha|驗證|验证|校验|校驗/i;
+  const INPUTS = 'input:not([type]), input[type=text], input[type=tel], input[type=number], input[type=search]';
+  for (const img of document.querySelectorAll('img, canvas')) {
+    const attrs = [img.className, img.id, img.getAttribute('alt'), img.getAttribute('title'),
+                   (img.getAttribute('src') || '').slice(0, 300), img.getAttribute('name')].join(' ');
+    if (!HINT.test(attrs) || !visible(img)) continue;
+    const r = img.getBoundingClientRect();
+    let best = null;
+    let node = img.parentElement;
+    for (let depth = 0; depth < 3 && node && !best; depth++, node = node.parentElement) {
+      for (const input of node.querySelectorAll(INPUTS)) {
+        if (!visible(input)) continue;
+        const q = input.getBoundingClientRect();
+        const dy = Math.abs((q.top + q.height / 2) - (r.top + r.height / 2));
+        const dx = Math.max(0, Math.max(q.left, r.left) - Math.min(q.right, r.right));
+        if (dy > Math.max(40, r.height) || dx > 400) continue;
+        if (!best || dx + dy < best.d) best = {q, d: dx + dy};
+      }
+    }
+    if (!best) continue;
+    const left = Math.min(r.left, best.q.left), top = Math.min(r.top, best.q.top);
+    const right = Math.max(r.right, best.q.right), bottom = Math.max(r.bottom, best.q.bottom);
+    out.push({kind: 'image_text', box: [Math.round(left), Math.round(top), Math.round(right - left), Math.round(bottom - top)]});
   }
   return out;
 }
@@ -106,7 +138,7 @@ CAPTCHA_CHALLENGE_TEXT = re.compile(
 
 @dataclass(frozen=True)
 class CaptchaWidget:
-    kind: str  # recaptcha_checkbox, turnstile, hcaptcha, slider, challenge
+    kind: str  # recaptcha_checkbox, turnstile, hcaptcha, slider, challenge, image_text
     box: tuple[int, int, int, int]  # viewport pixels, like Element.box
 
     def contains(self, x: float, y: float) -> bool:
@@ -146,6 +178,25 @@ GATE_TEXT: list[tuple[BlockedReason, re.Pattern[str]]] = [
 ]
 
 
+# An invitation code the site prints itself ("Invite code: 8888", "邀请码：AB12"). Only such a
+# code may be typed into an invite field (DESIGN §5.5: never guess one). The token must contain
+# a digit, or be 4+ capitals, so a following label word ("Register") is not taken for a code.
+PRINTED_INVITE = re.compile(
+    r"(?:invit(?:e|ation)|referr(?:al|er)|推荐码|推薦碼|邀请码|邀請碼)\s*(?:code)?\s*(?:is)?\s*[:：]?\s*"
+    r"([A-Za-z0-9]{3,16})\b",
+    re.I,
+)
+
+
+def printed_invite_codes(text: str) -> tuple[str, ...]:
+    codes = []
+    for m in PRINTED_INVITE.finditer(text):
+        token = m.group(1)
+        if any(c.isdigit() for c in token) or (len(token) >= 4 and token.isupper()):
+            codes.append(token)
+    return tuple(dict.fromkeys(codes))
+
+
 def gate_hints(text: str) -> list[BlockedReason]:
     return [reason for reason, pattern in GATE_TEXT if pattern.search(text)]
 
@@ -161,6 +212,7 @@ class PageFacts:
     wallet_signature_request: bool
     captcha: tuple[CaptchaWidget, ...] = ()  # visible CAPTCHA widgets and challenges
     captcha_challenge: bool = False  # an image/audio/slider challenge is showing
+    printed_codes: tuple[str, ...] = ()  # invitation codes the page prints itself
 
     def captcha_at(self, x: float, y: float) -> CaptchaWidget | None:
         return next((w for w in self.captcha if w.contains(x, y)), None)
@@ -192,8 +244,9 @@ def compute_facts(
         has_card_or_bank_fields=card_bank,
         wallet_signature_request=bool(WALLET_SIGNATURE.search(text)),
         captcha=captcha,
-        captcha_challenge=any(w.kind == "challenge" for w in captcha)
+        captcha_challenge=any(w.kind in ("challenge", "image_text") for w in captcha)
         or (bool(captcha) and bool(CAPTCHA_CHALLENGE_TEXT.search(text))),
+        printed_codes=printed_invite_codes(text),
     )
 
 

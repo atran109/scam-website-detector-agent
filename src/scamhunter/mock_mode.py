@@ -85,6 +85,7 @@ GATED_VARIANTS: dict[str, BlockedReason] = {
     "sms_gate": BlockedReason.SMS_VERIFICATION,
     "captcha": BlockedReason.CAPTCHA,
     "wallet_gate": BlockedReason.WALLET_REQUIRED,
+    "image_captcha": BlockedReason.CAPTCHA,
 }
 FIRST_ADDRESS_STEPS = 20  # gate 1: a correct address within this many steps
 FULL_COVERAGE_STEPS = 35  # gate 2: all six within this many steps
