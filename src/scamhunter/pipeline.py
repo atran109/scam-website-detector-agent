@@ -1019,9 +1019,19 @@ async def run_capture_only(
     return rows
 
 
+def original_triage(run_dir: Path) -> dict[str, TriageResult]:
+    """The run's probe results (`triage.jsonl`, then `triage_extra/triage.jsonl` from a resume)."""
+    out: dict[str, TriageResult] = {}
+    for path in (run_dir / "triage.jsonl", run_dir / "triage_extra" / "triage.jsonl"):
+        if path.exists():
+            out.update(load_triage(path))
+    return out
+
+
 async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[SiteResult]:
     """Re-run extraction + classification from saved evidence. No site is visited."""
     checkpoint = load_checkpoint(run_dir / "checkpoint.jsonl")
+    original = original_triage(run_dir)
     llm = LLMClient(settings.llm.gateway_url)
     ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm)
     results = []
@@ -1030,10 +1040,13 @@ async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[
         if old is None:
             continue
         snapshots = load_snapshots(ctx.site_dir(site))
+        # The probe's status, not the one the old analysis revised (2026-10-07: pilot site 021
+        # kept "empty" from a maintenance page the agent reached, after the rule changed).
+        triage = original.get(site.site_id, old.triage)
         analysis = await analyze(
             ctx,
             site,
-            old.triage,
+            triage,
             snapshots,
             partial=old.processing_status == ProcessingStatus.PARTIAL,
         )
@@ -1048,7 +1061,7 @@ async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[
         )
         result = build_result(
             site,
-            old.triage,
+            triage,
             analysis,
             processing=old.processing_status,
             notes=capture_notes,

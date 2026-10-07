@@ -95,7 +95,9 @@ pilot:
 
 # Re-classify from saved evidence; no site visits, so no selftest gate. Needs the gateway.
 RUN ?=
-rescore:
+# Depends on build: the rescore runs in the crawler image, so code changes must be in it
+# (2026-10-07: a rescore without a rebuild ran the old code and looked like a no-op).
+rescore: build
 	@test -n "$(RUN)" || (echo "usage: make rescore RUN=runs/<id>"; exit 1)
 	$(COMPOSE) up -d --wait llm-gateway
 	$(COMPOSE) run --rm --no-deps crawler scamhunter rescore --run-id $(notdir $(RUN))

@@ -924,3 +924,20 @@ Run `runs/pilot-20261007` (055, 145, 012, 021, 128, 071, 117 by the user in thei
 - **Fix 3, pending fills in the confirmation (145):** the question now lists this step's earlier calls ("in this same step, just before it": the fills of the same reply, which are not in the history yet) and, separately, earlier steps' typing; placeholders only.
 - **Fix 4, confirm the registration submit (145):** a question before each of the first **two** submits that follow a password-field fill (registration, then login) and before the first submit of a form without a password field (e.g. an email lookup or a code form); pending fills are used up by each submit, so a later click without new fills is not asked about. The question says which kind ("SUBMIT a form with a password (registration or login)" / "SUBMIT a form"). Supersedes the "one question per site" of 2026-10-07 01:10. Browser tests: one reply that fills the registration and clicks Register shows those fills in the question; email_verify asks at the registration and again at the code form.
 - **Fix 8 → PLAN M4:** app-download targets (`.apk`, `.mobileconfig`, store links in page scripts) as evidence, and the open trigger decision, are M4 items.
+
+## 2026-10-07 10:45 · H+? · RESULT: full browser suite; rescore of the pilot (no site visits)
+- `make test-browser`: **42 passed** (9 min 11 s), with the guard, the literal rule, the new confirmations and the new variants.
+- **Two problems found on the way, both fixed:** (1) `make rescore` did not rebuild the crawler image, so the first rescore ran the *old* code and answered from the gateway cache (0 tokens, same verdicts); `rescore` now depends on `build`. (2) `rescore` reused the checkpoint's triage, which the old code had revised to `empty` for 021, so 021 kept a wrong status; `rescore` now starts from the run's probe results (`original_triage`: `triage.jsonl`, then `triage_extra/triage.jsonl`), falling back to the checkpoint.
+- **`make rescore RUN=runs/pilot-20261007`** (saved evidence only, Sonnet 5.5 judge; the checkpoint before it is kept as `checkpoint.before-rescore.jsonl`):
+| site | before (verdict, p, evidence, output addresses) | after |
+|---|---|---|
+| **012** | not_scam 0.44, live, **0** | **scam 0.98**, live, **3** (BTC `bc1qwmus…`, EVM `0x76b10e09…`, TRON `TTaaQJnZ…`) |
+| **021** | not_scam 0.40, **none** (status `empty`) | **scam 0.72**, live (status `live`), 0 |
+| 027 | scam 0.59, 1 | scam 0.60, 1 |
+| 055 | scam 0.67 | scam 0.72 |
+| 071 | scam 0.65 | scam 0.65 |
+| 117 | scam 0.79 | scam 0.84 |
+| 128 | scam 0.69 | scam 0.69 |
+| 145 | scam 0.69 | scam 0.74 |
+- 012 after: signals `guaranteed_returns` 3.0, `profit_plus_capital` 1.5, `deposit_address_after_registration` 1.5, `finance_terms_in_domain` 0.5; judge scam 0.97 quoting the landing page ("Return 6.5 % Weekly For 2 Weeks Total profit + Capital") and the deposit page ("Registered account's deposit page shows a USDT ERC20 payment address"). 021 after: signal `crypto_only_payments`; judge scam on the landing page ("Join 480,000+ stock traders earning consistently", "Subscribe to AI plans for passive income") and notes the register page's maintenance placeholder as context. No verdict went the other way; the other six moved by at most 0.05.
+- Limits: the rescore does not re-run navigation, so 021's trace still says `blocked_at: other` (the new `maintenance` gate applies to new runs); 128 and 117 have no addresses to gain (no web deposit flow).
