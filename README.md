@@ -10,7 +10,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - Addresses: TODO(M6) primary addresses on TODO(M6) sites; TODO(M6) found only behind registration.
 - Accuracy on hand labels: precision TODO(M6) / recall TODO(M6) at threshold 0.45, and at 0.5 TODO(M6).
 - Navigation on real sites: reached a deposit page on TODO(M6) of TODO(M6) attempted; `blocked_at` tally TODO(M6).
-- Mock exchange (M3 step E, Sonnet 5.5): 18/18 solvable runs found all six addresses (first by step 9, all by step 21); gated variants 10/12 before the CAPTCHA fix, TODO(M6) after; zero policy refusals; $2.96 for 30 runs.
+- Mock exchange (M3 step E, Sonnet 5.5): 18/18 solvable runs found all six addresses (first by step 9, all by step 21); gated variants 12/12 after the CAPTCHA and history fixes (10/12 before); zero policy refusals; about $2.4 per 30-run batch.
 - Cost: TODO(M6) total, TODO(M6) per site (judge ≈ $0.012/call; navigator ≈ $0.07–0.15 per mock run).
 - Confidence: `scam_probability` ≥ 0.45 ⇒ scam (leans toward recall); `confidence` = P(stated verdict correct), so 0.45–0.5 is "scam" with confidence < 0.5, which marks the shaky verdicts.
 - Run it: `make selftest` → `make run` → `make report`; `make review RUN=<id>` for a read-only HTML review page.
