@@ -9,6 +9,8 @@ from scamhunter.models import (
     EvidenceSource,
     LLMJudgment,
     ScamType,
+    Signal,
+    SignalTier,
     SiteStatus,
     TriageResult,
     Verdict,
@@ -146,6 +148,19 @@ def test_dead_site_policy() -> None:
     )
     warned = score_without_content(cf, T, "Cloudflare warning page")
     assert warned.verdict == Verdict.SCAM and warned.scam_probability >= 0.85
+
+
+def test_dead_site_weak_signals_need_three() -> None:
+    weak = [
+        Signal(name=f"weak_{i}", tier=SignalTier.WEAK, weight=0.5, evidence="x", source="domain")
+        for i in range(3)
+    ]
+    one = score_without_content(weak[:1], T, "DNS does not resolve")
+    three = score_without_content(weak, T, "DNS does not resolve")
+
+    assert one.verdict == Verdict.NOT_SCAM
+    assert one.evidence_source == EvidenceSource.SIGNALS_ONLY
+    assert three.verdict == Verdict.SCAM
 
 
 # ---------- random-looking domains ----------

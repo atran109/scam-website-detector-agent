@@ -15,6 +15,7 @@ from scamhunter.models import (
     LLMJudgment,
     ScamType,
     Signal,
+    SignalTier,
     Verdict,
 )
 
@@ -25,6 +26,7 @@ PARTIAL_BOUNDS = (0.2, 0.8)
 WAYBACK_SHRINK = 0.8  # DESIGN §5.2a
 SIGNALS_ONLY_BAND = (0.5, 0.65)
 NOTHING_P = 0.4
+DEAD_SITE_MIN_WEAK = 3
 
 # Hard rules (DESIGN §5.4): signal name → (floor on scam probability, scam type).
 HARD_RULES: dict[str, tuple[float, ScamType]] = {
@@ -155,7 +157,9 @@ def score_without_content(
                 EvidenceSource.SIGNALS_ONLY,
             )
     scored = [s for s in signals if s.weight > 0]
-    if scored:
+    has_moderate = any(s.tier in {SignalTier.MODERATE, SignalTier.STRONG} for s in scored)
+    weak_count = sum(s.tier == SignalTier.WEAK for s in scored)
+    if has_moderate or weak_count >= DEAD_SITE_MIN_WEAK:
         total = sum(s.weight for s in scored)
         p = min(SIGNALS_ONLY_BAND[0] + 0.05 * total, SIGNALS_ONLY_BAND[1])
         return _finish(
@@ -163,6 +167,19 @@ def score_without_content(
             threshold,
             _type_from_signals(signals),
             f"{status_note}; no content to assess. Leans scam on indirect signals: "
+            f"{_signal_summary(scored)}.",
+            signals,
+            None,
+            "status_rule",
+            EvidenceSource.SIGNALS_ONLY,
+        )
+    if scored:
+        return _finish(
+            NOTHING_P,
+            threshold,
+            None,
+            f"{status_note}; no content to assess and indirect evidence is insufficient "
+            f"(need a moderate signal or {DEAD_SITE_MIN_WEAK} weak signals): "
             f"{_signal_summary(scored)}.",
             signals,
             None,

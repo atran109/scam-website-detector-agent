@@ -937,7 +937,7 @@ async def run_pipeline(
     finished = len(done) - len(retry_ids)
     print(
         f"{len(sites)} sites, {finished} already done, {len(todo)} to process"
-        f" ({len(retry_ids)} browser-loss retries)"
+        f" ({len(retry_ids)} retryable checkpoint records)"
     )
 
     llm = LLMClient(settings.llm.gateway_url)
