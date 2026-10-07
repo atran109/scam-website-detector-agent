@@ -32,8 +32,9 @@ OUTPUT_DIR = REPO_ROOT / "output"
 def _select(sites: list[Site], only: str | None) -> list[Site]:
     if not only:
         return sites
-    wanted = {f"{int(i):03d}" for i in only.split(",")}
-    return [s for s in sites if s.site_id in wanted]
+    by_id = {s.site_id: s for s in sites}
+    wanted = [f"{int(i):03d}" for i in only.split(",")]
+    return [by_id[i] for i in wanted if i in by_id]  # the order given (the pilot's order)
 
 
 def _finalize(results: Sequence[SiteResult], settings: Settings, run_id: str) -> None:
@@ -110,13 +111,15 @@ def cmd_run(args: argparse.Namespace) -> int:
             llm=llm,
             stop_file=stop_file,
             confirm=ask_operator if args.confirm_submit else None,
+            force=args.force_navigation,
             spend_cap_usd=args.spend_cap,
             progress=lambda line: print(f"    {line}", flush=True),
         )
         print(
             f"navigator on (max {nav.limits.max_steps} steps, {nav.limits.max_seconds} s per site"
             f"{f', session cap ${args.spend_cap:.2f}' if args.spend_cap else ''}"
-            f"{', confirm before first submit' if args.confirm_submit else ''}); "
+            f"{', confirm before first submit' if args.confirm_submit else ''}"
+            f"{', navigation forced on every site' if args.force_navigation else ''}); "
             f"stop everything with: touch runs/{run_id}/STOP",
             flush=True,
         )
@@ -269,7 +272,13 @@ def cmd_pipeline_mock(args: argparse.Namespace) -> int:
         llm = LLMClient(settings.llm.gateway_url, timeout_s=200, retries=1)
         try:
             return await evaluate_pipeline_on_mock(
-                variants, out, settings, limits, llm, args.spend_cap
+                variants,
+                out,
+                settings,
+                limits,
+                llm,
+                args.spend_cap,
+                confirm=ask_operator if args.confirm_submit else None,
             )
         finally:
             await llm.aclose()
@@ -304,6 +313,11 @@ def main(argv: list[str] | None = None) -> int:
         "--confirm-submit",
         action="store_true",
         help="ask before the first form submission on each site (forces one site at a time)",
+    )
+    run.add_argument(
+        "--force-navigation",
+        action="store_true",
+        help="navigate every site that loaded with content, whatever the first judgment says",
     )
     run.add_argument("--max-steps", type=int, help="navigator steps per site (settings default)")
     run.add_argument("--max-seconds", type=int, help="navigator wall-clock per site")
@@ -343,6 +357,9 @@ def main(argv: list[str] | None = None) -> int:
     pmock.add_argument("--run-id", help="run directory name (default: timestamp)")
     pmock.add_argument("--variants", default="all", help="comma-separated, or 'all'")
     pmock.add_argument("--spend-cap", type=float, default=5.0, help="USD for the whole session")
+    pmock.add_argument(
+        "--confirm-submit", action="store_true", help="ask before the first submit (dry run)"
+    )
     pmock.add_argument("--max-steps", type=int, default=30)
     pmock.add_argument("--max-seconds", type=int, default=300)
     review = sub.add_parser("review", help="read-only HTML review page from saved evidence")

@@ -110,3 +110,11 @@ def test_wallet_mock_is_off_and_the_prompt_says_never_connect_a_wallet() -> None
     assert "- connect a wallet;" in never.split("\n\n")[0] + "\n"
     assert "test wallet" not in prompt  # the mock-wallet rule is absent
     assert "wallet_required" in prompt  # and a wallet-only site ends with that gate
+
+
+def test_only_keeps_the_order_given() -> None:
+    from scamhunter.cli import URLS_PATH, _select
+    from scamhunter.pipeline import load_sites
+
+    sites = load_sites(URLS_PATH)
+    assert [s.site_id for s in _select(sites, "27,55,145,12")] == ["027", "055", "145", "012"]

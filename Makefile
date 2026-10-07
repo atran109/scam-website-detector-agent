@@ -85,11 +85,12 @@ endif
 	$(COMPOSE) run --rm crawler scamhunter pipeline-mock --run-id $(RUN_ID) $(ARGS)
 
 # Watched real-site pilot (LOG 2026-10-07): Sonnet 5.5 navigator and judge, 30 steps, 300 s per
-# site, $5 session cap, one site at a time, confirm before each site's first form submission.
-# Stop everything with: touch runs/<run id>/STOP. Full selftest first (via `run`).
-PILOT_SITES ?= 117,071,012,021,128,055,027,145
+# site, $5 session cap, one site at a time, navigation forced (the trigger is not under test),
+# confirm before each site's first form submission, in the order below. Stop everything with:
+# touch runs/<run id>/STOP. Full selftest first (via `run`). Needs a terminal for the prompts.
+PILOT_SITES ?= 027,055,145,012,021,128,071,117
 pilot:
-	$(MAKE) run ARGS="--only $(PILOT_SITES) --confirm-submit --max-steps 30 --max-seconds 300 --spend-cap 5"
+	$(MAKE) run ARGS="--only $(PILOT_SITES) --force-navigation --confirm-submit --max-steps 30 --max-seconds 300 --spend-cap 5 $(PILOT_ARGS)"
 
 # Re-classify from saved evidence; no site visits, so no selftest gate. Needs the gateway.
 RUN ?=

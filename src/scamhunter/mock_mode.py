@@ -18,7 +18,14 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 from scamhunter.agent.identity import MailMessage, new_identity
-from scamhunter.agent.loop import AgentLimits, AgentRun, Decider, Evidence, NavigationLoop
+from scamhunter.agent.loop import (
+    AgentLimits,
+    AgentRun,
+    Confirm,
+    Decider,
+    Evidence,
+    NavigationLoop,
+)
 from scamhunter.agent.policy import Policy, registrable
 from scamhunter.agent.site_run import NavigationOptions, Spend
 from scamhunter.browser.sandbox import launch_mock_browser, new_context
@@ -326,6 +333,7 @@ async def evaluate_pipeline_on_mock(
     limits: AgentLimits,
     llm: LLMClient,
     spend_cap_usd: float,
+    confirm: Confirm | None = None,
 ) -> list[dict[str, Any]]:
     """Each variant once through `pipeline.process_site`: capture, first judgment, the navigator
     (trigger forced on), second judgment, `build_result`. What differs from a real site: the
@@ -364,6 +372,7 @@ async def evaluate_pipeline_on_mock(
                 spend_cap_usd=spend_cap_usd,
                 spend=spend,
                 force=True,
+                confirm=confirm,
                 loopback_only=True,
                 mailbox_factory=mailbox,
                 progress=lambda line: print(f"    {line}", flush=True),
