@@ -38,7 +38,7 @@ classify:
   uncertain_band: [0.35, 0.65]      # triggers navigation and/or second look
   scam_threshold: 0.45              # verdict = scam if fused score >= this (slight recall lean); calibrate on labels
 features:
-  wallet_mock: true
+  wallet_mock: false                 # no mock wallet in v1 (LOG 2026-10-07); not read by the policy or prompt
   qr_decode: true
   ocr: false
   archive_fallback: true            # Wayback recovery for non-live sites (§5.2a)

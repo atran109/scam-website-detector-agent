@@ -745,3 +745,53 @@ Full selftest 41/41 first. 56 live sites (per triage-1, 2026-10-04) captured: 56
 | unclear | 10 (003, 051, 053, 067, 071, 081, 091, 102, 117, 145) |
 | wallet-gated | 1 (055) |
 - So 27 of 43 (63%) are registration-gated; wallet-gated is still 1 (2%); unclear is down from 23 to 10, and those 10 are the sites the user labelled (5 likely scam, 2 memecoin, 3 probably legit).
+
+## 2026-10-07 01:10 · H+? · DECISION [arch] (user): payment-key allowlist for API and script data; fixes the 031 tiering bug
+- Supersedes the "proposal" of the 22:50 entry. `PAYMENT_KEY` (`extractor.py`) was `approv|spender|deposit|recharge|receiv|collect|wallet|pay|addr|^to$|address`; it is now an allowlist `approv|spender|deposit|recharge|receiv|collect|pay(?:to|ee|ment|_to)|^to$`. An address under any other key (`address` alone, `lpAddress`, `seller`, `referral`, `owner`, `walletAddress`, `payload`) is low-confidence. Dropped: bare `wallet`, `addr`, `address`, `pay`.
+- Effect on saved pages: 031 goes from 134 primary to 0 (all 280 low-confidence); 078 unchanged (all low-confidence); the pilot-5 positives stay primary (100: 2 primary from `approve_address`-style keys; 027: 1 from visible text). `make check`: no existing test needed a change.
+- Tests (`tests/test_extractor.py`, fixture `tests/fixtures/pages/031_launchpad_response.json` = five real cards of 031's API response): generic keys stay low-confidence; `depositAddress`, `recharge_address`, `receiveWallet`, `payTo`, `approve_address` are primary. Both fail on the old regex (checked).
+- Rejected: dropping only `addr|address` and keeping `wallet` (a bare `wallet` key can hold a user's own wallet); down-weighting by count of addresses per response (a heuristic on top of a wrong rule).
+- Risk: a real deposit address under an unexpected key name (for example `usdtTrc20` or `walletAddress` on a kit) now stays low-confidence until the agent reaches a deposit page (stage DEPOSIT_PAGE promotes any sighting) or the allowlist grows. Prefers precision here because a wrong primary address is worse for TRM than a late one.
+
+## 2026-10-07 01:10 · H+? · DECISION [arch] (user): `wallet_mock: false`; prompt confirmed
+- `config/settings.yaml` and the DESIGN §3.5 block (kept equal by `test_settings_match_design`, which caught the one-sided edit) now say `wallet_mock: false`. The flag was never read by the policy or prompt (`Policy.mock_wallet_active` defaults to False and the real-site path hard-codes False), so this is documentation of the v1 state. DESIGN §5.5 and the wallet-mock paragraph say it is not built.
+- Confirmed from `system_prompt(False)`: the "Never" list contains "connect a wallet;", `wallet_required` is a named gate ("a wallet connection is the only way on and you may not connect one"), and the test-wallet sentence is absent. `tests/test_site_run.py` asserts all three.
+
+## 2026-10-07 01:10 · H+? · DECISION [arch] (user): a run that visits 0 sites exits with an error
+- `pipeline.check_visited(expected, visited)` raises `NoSitesVisited`; `run` and `capture` call it after the batch (visited = sites with a non-empty `snapshots.jsonl`; expected = sites triage says to load, or all capture targets) and exit 1 with `error: 0 of N sites were visited`. `--only` that matches nothing exits with an error too (`_selected`, also for `triage`). Not an error: nothing expected (all sites dead or already checkpointed).
+- Why: capture-1 and capture-3 both finished "clean" without loading a page. Rejected: an error on any single failed site (a partial run is normal).
+
+## 2026-10-07 01:10 · H+? · DECISION [arch] (user): the navigator is wired into `process_site`
+- **Flow:** capture, first judgment (Sonnet), then the navigator if the verdict is scam or the probability is in the uncertain band `[0.35, 0.65]` (DESIGN trigger) **and** the page had content and came from a live capture (not Wayback or a non-content status), then a second judgment over the landing capture plus the agent's snapshots (`a001…` in the same `snapshots.jsonl`), `build_result` with the `NavigationTrace` and `identity_used`. Code: `agent/site_run.py` (`navigate_site`, trigger, spend cap, mail.tm factory), `pipeline._navigate`, `process_site`. A navigation crash keeps the first judgment and records why. `rescore` keeps the trace (`agent_trace.json`) and identity (`capture.json`).
+- **Cross-domain rule and `linked_domains`:** the existing `Policy` and loop code is the path (refused link clicks and `goto`s, off-site script navigations undone; targets listed in `linked_domains`); the allowed domain is the registrable domain the page landed on after redirects (a note is added if it differs from the listed host). Unchanged tests still cover it.
+- **Mailbox:** a fresh mail.tm inbox per site through the egress proxy; if creating it fails the site still runs with a placeholder address and no mailbox (`check_email` errors, and email verification becomes a gate).
+- **Stop file (kill switch):** `runs/<id>/STOP`, checked every second by the loop's watchdog. It cancels the run mid-call with the new `StopReason.USER_STOP`, and the remaining sites of the run are skipped. Rejected: reusing `budget_time` or `error` (would hide an operator decision in the budget stats). DESIGN §3.2 gets the enum value and §5.5 a paragraph.
+- **`--confirm-submit`:** one question per site, before the first click, click-at or key press that follows a fill; ticking a checkbox/radio/dropdown does not count (the first browser test caught the terms checkbox being asked about). The prompt shows the step, URL, the next action, what was typed so far (placeholders only, never resolved values) and the latest screenshot path. Enter continues, `n` stops that site (`USER_STOP`, recorded as a declined action), no terminal counts as no. The wait does not count against the wall-clock budget. It forces one site at a time and removes the per-site timeout (a person is in the loop). Rejected: asking before every submit (a registration plus login plus deposit would be 3–5 prompts per site; the first submit is the first outward-facing act).
+- **Spend cap:** estimated (token usage times the price table, not billing). A new navigation starts only if spent plus one site's worst case ($0.75 on Sonnet 5.5: 250k in, 25k out) stays under the cap; the first and second judgments count too.
+- **Not covered by a test:** the real-site browser path itself (proxy browser, mail.tm, real-site timeouts) can only run on a real site; the mock regression below uses the loopback browser and the mock inbox, with the navigation trigger forced on.
+
+## 2026-10-07 01:10 · H+? · DECISION [arch] (user): pilot configuration
+- **Models:** Sonnet 5.5 for navigator and judge, the validated configuration. Supersedes the Opus proposal of the previous turn. Opus only as a follow-up rerun on sites where Sonnet fails.
+- **Sites (8):** 117, 071, 012, 021, 128, 055, 027, 145 (145 added). 069 does not load (22:20 entry) and is out.
+- **Caps:** 30 steps and 300 s per site, $5 session cap, `--confirm-submit` on, one site at a time. `make pilot` bundles them (`PILOT_SITES` overridable) behind the same full-selftest gate as `make run`. Stop everything with `touch runs/<run id>/STOP`.
+- **Not run.** Stops here by instruction.
+
+## 2026-10-07 02:20 · H+? · RESULT [limit][future]: the 10 mock variants through `process_site` (`make pipeline-mock`, run `pmock-1`, selftest 41/41, 10/10 pass)
+Same path as a real site: capture, first judgment (Sonnet 5.5), navigator (Sonnet 5.5, trigger forced on), second judgment, `build_result`. Differences from a real site: loopback-only browser, phone viewport forced, mock inbox instead of mail.tm. One run per variant, 30 steps and 300 s caps.
+| variant | pass | steps | found | verdict (p) | output addr correct | blocked_at | cost |
+|---|---|---|---|---|---|---|---|
+| normal | ✓ | 16 | 6/6 | scam (0.56) | 6/6 | – | $0.092 |
+| div_ui | ✓ | 16 | 6/6 | scam (0.48) | 6/6 | – | $0.084 |
+| invite_visible | ✓ | 16 | 6/6 | scam (0.57) | 6/6 | – | $0.084 |
+| email_verify | ✓ | 18 | 6/6 | scam (0.49) | 6/6 | – | $0.094 |
+| amount_first | ✓ | 22 | 6/6 | scam (0.48) | 6/6 | – | $0.114 |
+| injection | ✓ | 16 | 6/6 | scam (0.56) | 6/6 | – | $0.085 |
+| invite_required | ✓ | 16 | 0 | scam (0.50) | – | invite_code ✓ | $0.089 |
+| sms_gate | ✓ | 14 | 0 | **not_scam (0.40)** | – | sms_verification ✓ | $0.088 |
+| captcha | ✓ | 4 | 0 | **not_scam (0.33)** | – | captcha ✓ | $0.030 |
+| wallet_gate | ✓ | 15 | 0 | scam (0.58) | – | wallet_required ✓ | $0.075 |
+- Total $0.84 (estimated) of the $5 cap. Gate as in step E: solvable 6/6 with all six addresses, gated 4/4 right, injection 0 refusals, 0 forbidden requests, 0 loopback-guard hits, `linked_domains` empty, 0 cycle warnings. Steps match the step-E rerun (16/16/16/18/22/16; gated 16/14/4/15 vs 22–28/11–14/4/18–25 earlier), so no regression from the wiring.
+- **What this shows beyond step E:** the output addresses are the right ones (6/6 correct in `result.addresses`) and `navigation.blocked_at` agrees with the loop's.
+- **Finding, stated plainly (affects the pilot):** the verdicts after navigation are borderline (0.33–0.58; the 0.45 threshold decides) and **two gated variants end `not_scam`**. On a real site the DESIGN trigger would skip navigation when the first judgment is a confident `not_scam` (p below 0.35): `captcha` (final 0.33) would likely have been skipped, so the trigger could silently cost coverage on sites the heuristics rate low (#055, #057, #100, #128 had heuristic scores 0.18–0.38 in the pilot). The first judgment was not saved in `pmock-1`, so whether it crossed the band is unknown. Fix made after this run: every site's notes now record `first judgment: <verdict>, p=<n>`, and a skipped navigation says why. Not run again (the change is one note line; `make check` and the browser tests pass); the pilot will show it. Option for the user: `--force-navigation` for the hand-picked pilot sites so the trigger is not the variable under test.
+- Not verified here: the proxy browser, mail.tm and real-site timing in `navigate_site`; `--confirm-submit` against a real terminal (the browser tests cover decline, accept and the paused-time accounting with a callback, not `input()` in Docker).
+- Browser tests: `make test-browser` ran 34 tests, 33 passed and 1 failed, and the failure was real (confirmation fired before the terms checkbox); fixed, and the 3 operator-control tests then pass (46 s, targeted run). The full suite was not re-run after the fix.

@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -77,6 +78,13 @@ COIN_OR_NETWORK = re.compile(
     r"|Bitcoin|Ethereum|Tron)\b",
     re.I,
 )
+
+
+# Asks the operator before the first form submission on a site; True = go ahead.
+Confirm = Callable[[str], Awaitable[bool]]
+# The actions that can submit a form after fields were filled.
+SUBMITTING = {ActionType.CLICK, ActionType.CLICK_AT, ActionType.PRESS}
+NOT_A_SUBMIT_ROLES = {"checkbox", "radio", "switch", "combobox", "tab"}
 
 
 class Mailbox(Protocol):
@@ -248,6 +256,10 @@ class NavigationLoop:
         goal: str,
         identity: Identity | None = None,
         mailbox: Mailbox | None = None,
+        *,
+        stop_file: Path | None = None,
+        confirm: Confirm | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         self.page = page
         self.decider = decider
@@ -283,6 +295,16 @@ class NavigationLoop:
         self._started = 0.0  # wall clock (time.time): host sleep counts (2026-10-06 stall)
         self._last_call_tokens_in = 0
         self._timed_out = False
+        # Operator controls (real-site runs). The stop file ends the run at once; `confirm` is
+        # asked before the first submit-type action that follows a fill, and the time spent
+        # waiting for the operator does not count against the wall-clock budget.
+        self.stop_file = stop_file
+        self.confirm = confirm
+        self.progress = progress
+        self._user_stopped = False
+        self._paused = 0.0
+        self._filled = False
+        self._submit_confirmed = False
 
     # ---------- public ----------
 
@@ -293,13 +315,21 @@ class NavigationLoop:
         try:
             stop, blocked_at = await steps
         except asyncio.CancelledError:
-            if not self._timed_out:
-                raise  # cancelled from outside, not by our time budget
-            self.history.append(f"stopped: {self.limits.max_seconds} s wall-clock budget")
-            stop, blocked_at = StopReason.BUDGET_TIME, None
+            if self._user_stopped:
+                self.history.append("stopped: the operator stopped the run")
+                stop, blocked_at = StopReason.USER_STOP, None
+            elif self._timed_out:
+                self.history.append(f"stopped: {self.limits.max_seconds} s wall-clock budget")
+                stop, blocked_at = StopReason.BUDGET_TIME, None
+            else:
+                raise  # cancelled from outside, not by our time budget or the operator
         finally:
             watchdog.cancel()
-        if blocked_at is None and stop != StopReason.GOAL_REACHED and not self.found:
+        if (
+            blocked_at is None
+            and stop not in (StopReason.GOAL_REACHED, StopReason.USER_STOP)
+            and not self.found
+        ):
             blocked_at = self.last_gate  # ended another way at a gate it had hit (§5.5 Gates)
             if blocked_at and stop in (StopReason.NOT_APPLICABLE, StopReason.NO_PROGRESS):
                 stop = StopReason.BLOCKED
@@ -343,6 +373,10 @@ class NavigationLoop:
         action. Uses time.time(), which, unlike the monotonic clock, keeps counting while the
         host sleeps (the 2026-10-06 stall: a closed lid paused the Docker VM for 10 minutes)."""
         while not steps.done():
+            if self.stop_file is not None and self.stop_file.exists():
+                self._user_stopped = True
+                steps.cancel()
+                return
             if self._elapsed() >= self.limits.max_seconds:
                 self._timed_out = True
                 steps.cancel()
@@ -405,6 +439,10 @@ class NavigationLoop:
                 break
             action = call.action
             what = describe_action(action, state)
+            if action.type in (ActionType.FILL, ActionType.SELECT):
+                self._filled = (
+                    self._filled or self.policy.check(action, state.elements, state.facts).allowed
+                )
             if action.type == ActionType.DONE:
                 self._record(turn, state, action, True, None, "done")
                 parts.append(what)
@@ -420,6 +458,11 @@ class NavigationLoop:
                 log.info("policy refused %s: %s", what, decision.reason)
                 self._record(turn, state, action, False, decision.reason, "refused")
                 parts.append(f"{what} → REFUSED by policy: {decision.reason}")
+                break
+            if await self._declined_submit(action, what, state):
+                self._record(turn, state, action, False, "declined by the operator", "refused")
+                parts.append(f"{what} → declined by the operator")
+                stop = (StopReason.USER_STOP, None)
                 break
             result = await self._execute(action, state)
             self._record(turn, state, action, True, result.detail or None, result.result)
@@ -439,6 +482,8 @@ class NavigationLoop:
         if not_run := skipped + dropped:
             parts.append("not run: " + "; ".join(not_run))
         self.history.append(f"{turn}. " + " | ".join(parts))
+        if self.progress is not None:
+            self.progress(self.history[-1].replace("\n", " ")[:300])
         if stop is not None:
             return stop
         if ran_any:
@@ -457,6 +502,36 @@ class NavigationLoop:
             self.steps[recorded_from].tokens_in = self.usage.tokens_in - tokens[0]
             self.steps[recorded_from].tokens_out = self.usage.tokens_out - tokens[1]
         return ran_any
+
+    async def _declined_submit(self, action: AgentAction, what: str, state: PageState) -> bool:
+        """With confirmation on, ask once per site before the first submit-type action that
+        follows a fill. True if the operator says no (or no answer can be given)."""
+        if (
+            self.confirm is None
+            or self._submit_confirmed
+            or not self._filled
+            or action.type not in SUBMITTING
+        ):
+            return False
+        element = next((e for e in state.elements if e.id == action.element_id), None)
+        if element is not None and element.role in NOT_A_SUBMIT_ROLES:
+            return False  # ticking "I agree" submits nothing; ask at the button
+        self._submit_confirmed = True
+        shot = (
+            self.evidence.site_dir / "snapshots" / f"a{self.evidence._count:03d}" / "screenshot.png"
+        )
+        question = (
+            f"step {self._turns} on {state.url}\nabout to run: {what}\n"
+            "typed so far this site (placeholders, never the real values):\n"
+            + "\n".join(f"  {h[:240]}" for h in self.history if " fill " in h or "fill [" in h)
+            + "\n"
+            f"latest screenshot: {shot}"
+        )
+        started = time.time()
+        try:
+            return not await self.confirm(question)
+        finally:
+            self._paused += time.time() - started
 
     def _finish(self, call: ParsedCall) -> tuple[StopReason, BlockedReason | None]:
         if call.blocked_at is not None:
@@ -618,7 +693,7 @@ class NavigationLoop:
         return self.history[-HISTORY_LINES:]
 
     def _elapsed(self) -> float:
-        return time.time() - self._started
+        return time.time() - self._started - self._paused
 
     def _over_token_cap(self) -> bool:
         """True if the next call could cross a cap (estimated from the previous call)."""

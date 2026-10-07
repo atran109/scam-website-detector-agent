@@ -9,7 +9,7 @@ RUN_ID ?= $(shell date +%Y-%m-%dT%H-%M-%S)
 ROUTER_IP ?= $(shell route -n get default 2>/dev/null | awk '/gateway:/{print $$2}')
 COMPOSE := RUN_ID=$(RUN_ID) SELFTEST_ROUTER_IP=$(ROUTER_IP) docker compose
 
-.PHONY: agent-mock review build selftest triage run capture rescore eval report test test-browser lint check venv down
+.PHONY: agent-mock pipeline-mock pilot review build selftest triage run capture rescore eval report test test-browser lint check venv down
 
 $(BIN)/python: pyproject.toml
 	$(PYTHON) -m venv $(VENV)
@@ -70,6 +70,26 @@ else
 	$(COMPOSE) run --rm crawler python docker/selftest.py
 endif
 	$(COMPOSE) run --rm crawler scamhunter agent-mock --run-id $(RUN_ID) $(ARGS)
+
+# The 10 mock variants through process_site (capture, judge, navigator, judge, build_result):
+# the real-site path against the loopback-only mock. Same selftest gate and waiver as agent-mock.
+pipeline-mock: build
+	@mkdir -p runs/$(RUN_ID)
+	$(COMPOSE) up -d --force-recreate --wait egress-proxy llm-gateway
+ifeq ($(SELFTEST_WAIVER),rebind-probe)
+	-$(COMPOSE) run --rm crawler python docker/selftest.py
+	$(BIN)/python docker/selftest_waiver.py runs/$(RUN_ID)/selftest.json
+else
+	$(COMPOSE) run --rm crawler python docker/selftest.py
+endif
+	$(COMPOSE) run --rm crawler scamhunter pipeline-mock --run-id $(RUN_ID) $(ARGS)
+
+# Watched real-site pilot (LOG 2026-10-07): Sonnet 5.5 navigator and judge, 30 steps, 300 s per
+# site, $5 session cap, one site at a time, confirm before each site's first form submission.
+# Stop everything with: touch runs/<run id>/STOP. Full selftest first (via `run`).
+PILOT_SITES ?= 117,071,012,021,128,055,027,145
+pilot:
+	$(MAKE) run ARGS="--only $(PILOT_SITES) --confirm-submit --max-steps 30 --max-seconds 300 --spend-cap 5"
 
 # Re-classify from saved evidence; no site visits, so no selftest gate. Needs the gateway.
 RUN ?=

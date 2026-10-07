@@ -126,6 +126,7 @@ class StopReason(StrEnum):
     BLOCKED = "blocked"  # gate we won't pass; see BlockedReason
     NO_PROGRESS = "no_progress"  # loop detected
     NOT_APPLICABLE = "not_applicable"  # site has no account/deposit concept
+    USER_STOP = "user_stop"  # the operator stopped the run (stop file) or declined a submit
     ERROR = "error"
 
 

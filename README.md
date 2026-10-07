@@ -74,3 +74,4 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - Page content is untrusted data: delimited, control/bidi characters stripped, never followed as instructions.
 - Hard per-site token caps, a wall-clock time limit that cancels in-flight calls, and a session spend cap.
 - Off-site targets are never followed; each refused one is recorded in `linked_domains`.
+- Operator controls on real sites: a stop file (`touch runs/<id>/STOP`) ends the run mid-call, `--confirm-submit` asks before each site's first form submission (placeholders only are shown), and a session spend cap stops new navigations.

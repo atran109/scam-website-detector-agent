@@ -47,8 +47,12 @@ def labelled_contract(label_line: str) -> bool:
 # Keys whose value is a token/contract address: never a scammer's wallet (pilot: coin-list APIs).
 CONTRACT_KEY = re.compile(r"contract|token_?addr|^mint$|^token$", re.I)
 # Keys whose value is where money or approvals go (pilot: "approve_address": spender wallets).
+# Keys whose address is where the visitor is told to send funds. An allowlist: any other key
+# (lpAddress, seller, referral, owner, token, address on its own...) is low-confidence, because a
+# generic "address" key holds third-party data on launchpads and dashboards (site 031: 134
+# liquidity-pool and seller addresses were primary). "pay" alone is too loose ("payload").
 PAYMENT_KEY = re.compile(
-    r"approv|spender|deposit|recharge|receiv|collect|wallet|pay|addr|^to$|address", re.I
+    r"approv|spender|deposit|recharge|receiv|collect|pay(?:to|ee|ment|_to)|^to$", re.I
 )
 _STRUCTURED_SOURCES = {AddressSource.NETWORK_RESPONSE, AddressSource.SCRIPT}
 

@@ -20,11 +20,12 @@ from playwright.async_api import async_playwright
 from scamhunter.agent.identity import MailMessage, new_identity
 from scamhunter.agent.loop import AgentLimits, AgentRun, Decider, Evidence, NavigationLoop
 from scamhunter.agent.policy import Policy, registrable
+from scamhunter.agent.site_run import NavigationOptions, Spend
 from scamhunter.browser.sandbox import launch_mock_browser, new_context
-from scamhunter.config import REPO_ROOT, load_settings, require_loopback_url
+from scamhunter.config import REPO_ROOT, Settings, load_settings, require_loopback_url
 from scamhunter.extract.blocklist import load_blocklist
-from scamhunter.llm.client import PRICES_PER_MTOK
-from scamhunter.models import AddressTier, BlockedReason
+from scamhunter.llm.client import PRICES_PER_MTOK, LLMClient
+from scamhunter.models import AddressTier, BlockedReason, Site, SiteStatus, TriageResult
 
 log = logging.getLogger(__name__)
 EXCHANGE_DIR = REPO_ROOT / "tests" / "fixtures" / "mock_exchange"
@@ -169,6 +170,7 @@ async def run_on_mock(
     run_dir: Path,
     limits: AgentLimits,
     goal: str,
+    loop_kwargs: dict[str, Any] | None = None,
 ) -> MockRun:
     """One agent run against a fresh mock exchange, in a loopback-only browser with a phone
     viewport (the mock is an H5-style site). Evidence goes to `run_dir/sites/mock-<variant>`.
@@ -197,6 +199,7 @@ async def run_on_mock(
                 goal=goal,
                 identity=identity,
                 mailbox=MockMailbox(exchange, identity.email),
+                **(loop_kwargs or {}),
             )
             run = await loop.run()
             blocked = list(getattr(context, "blocked_urls", []))
@@ -311,3 +314,117 @@ def _write_summary(
         "runs": rows,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+# ---------- the same mock variants through the real-site path (process_site) ----------
+
+
+async def evaluate_pipeline_on_mock(
+    variants: list[str],
+    run_dir: Path,
+    settings: Settings,
+    limits: AgentLimits,
+    llm: LLMClient,
+    spend_cap_usd: float,
+) -> list[dict[str, Any]]:
+    """Each variant once through `pipeline.process_site`: capture, first judgment, the navigator
+    (trigger forced on), second judgment, `build_result`. What differs from a real site: the
+    browser is loopback-only (mock mode), the phone viewport is forced (the mock is an H5 site),
+    and the mailbox is the mock exchange's inbox instead of mail.tm. Summary rows add the
+    pipeline's own verdict and what would be written to the output file."""
+    from scamhunter.pipeline import RunContext, process_site  # late: pipeline imports this module
+
+    spend = Spend()
+    model = settings.llm.navigator_model
+    out_dir = run_dir / "pipeline_mock"
+    rows: list[dict[str, Any]] = []
+    async with async_playwright() as pw:
+        browser = await launch_mock_browser(pw)
+        for variant in variants:
+            worst = worst_case_cost(limits, model)
+            if spend.usd + worst > spend_cap_usd:
+                log.warning("spend cap: $%.2f spent, next run could cost $%.2f", spend.usd, worst)
+                break
+            exchange = load_exchange_module().MockExchange(variant=variant)
+            base = require_loopback_url(exchange.start())
+            emails: list[str] = []
+
+            async def mailbox(site, exchange=exchange, emails=emails):
+                identity = new_identity(f"agent{secrets.token_hex(4)}@mock.test")
+                emails.append(identity.email)
+
+                async def close() -> None:
+                    return None
+
+                return identity, MockMailbox(exchange, identity.email), close
+
+            nav = NavigationOptions(
+                limits=limits,
+                llm=llm,
+                spend_cap_usd=spend_cap_usd,
+                spend=spend,
+                force=True,
+                loopback_only=True,
+                mailbox_factory=mailbox,
+                progress=lambda line: print(f"    {line}", flush=True),
+            )
+            host = urlparse(base).hostname or ""
+            site = Site(
+                site_id=f"mock-{variant}", url=base, host=host, registrable_domain=registrable(host)
+            )
+            ctx = RunContext(
+                settings=settings,
+                run_dir=out_dir,
+                llm=llm,
+                browser=browser,
+                force_mobile=True,
+                loopback_only=True,
+                nav=nav,
+            )
+            before = spend.usd
+            try:
+                result = await process_site(
+                    ctx, site, TriageResult(status=SiteStatus.LIVE, elapsed_ms=1)
+                )
+            finally:
+                exchange.stop()
+            agent_run = nav.runs.get(site.site_id)
+            row: dict[str, Any] = {
+                "variant": variant,
+                "site_cost_usd": round(spend.usd - before, 4),
+            }
+            if agent_run is None:
+                row |= {"passed": False, "error": "navigator did not run", "notes": result.notes}
+            else:
+                scored = score(
+                    variant, agent_run, exchange, emails[-1], nav.blocked.get(site.site_id, [])
+                )
+                nav_trace = result.navigation
+                output_addresses = {a.address for a in result.addresses}
+                row |= run_summary(scored, model)
+                row |= {
+                    "verdict": result.classification.verdict.value,
+                    "scam_probability": result.classification.scam_probability,
+                    "output_addresses": len(output_addresses),
+                    "output_correct": len(output_addresses & set(scored.expected.values())),
+                    "result_blocked_at": nav_trace.blocked_at.value
+                    if nav_trace and nav_trace.blocked_at
+                    else None,
+                    "linked_domains": nav_trace.linked_domains if nav_trace else None,
+                    "notes": result.notes,
+                }
+            rows.append(row)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "spent_usd": round(spend.usd, 4),
+                        "spend_cap_usd": spend_cap_usd,
+                        "runs": rows,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+        await browser.close()
+    return rows

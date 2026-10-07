@@ -220,3 +220,36 @@ def test_contract_status_applies_across_sources() -> None:
     ignored: list[str] = []
     assert extract(snapshot(html), BLOCKLIST, ignored) == []
     assert ignored == [A["evm"]]  # reported once, not once per source
+
+
+# Site 031 (a token-launch marketplace): its API lists third-party launchpad data under the keys
+# seller, lpAddress and referral. Five cards of the saved response (capture-2, 2026-10-07).
+LAUNCHPAD = (FIXTURES / "031_launchpad_response.json").read_text()
+
+
+def _from_api(body: str) -> list:
+    page = SnapshotContent(
+        "s1",
+        DiscoveryStage.LANDING,
+        "https://fixture.test/eth",
+        "",
+        "",
+        network=[NetworkBody("https://api.fixture.test/cards", "xhr", body)],
+    )
+    return extract(page, BLOCKLIST)
+
+
+def test_generic_address_keys_in_api_data_stay_low_confidence() -> None:
+    found = _from_api(LAUNCHPAD)
+    assert found, "the fixture holds addresses"
+    assert {a.tier for a in found} == {AddressTier.LOW_CONFIDENCE}
+
+
+def test_payment_keys_in_api_data_are_primary() -> None:
+    addr = "0x1111111111111111111111111111111111111111"
+    for key in ("depositAddress", "recharge_address", "receiveWallet", "payTo", "approve_address"):
+        found = _from_api(f'{{"data":{{"{key}":"{addr}"}}}}')
+        assert [a.tier for a in found] == [AddressTier.PRIMARY], key
+    for key in ("address", "lpAddress", "owner", "walletAddress", "payload"):
+        found = _from_api(f'{{"data":{{"{key}":"{addr}"}}}}')
+        assert [a.tier for a in found] == [AddressTier.LOW_CONFIDENCE], key

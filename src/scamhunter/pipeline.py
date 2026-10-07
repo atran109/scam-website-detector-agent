@@ -12,7 +12,7 @@ import re
 import shutil
 import traceback
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -21,6 +21,13 @@ import tldextract
 from playwright.async_api import Browser, async_playwright
 from playwright.async_api import Error as PlaywrightError
 
+from scamhunter.agent.site_run import (
+    NavigationOptions,
+    mailtm_factory,
+    navigate_site,
+    should_navigate,
+    spend_blocks,
+)
 from scamhunter.browser.capture import (
     NetworkRecorder,
     load_snapshot_content,
@@ -43,6 +50,7 @@ from scamhunter.models import (
     CryptoAddress,
     DiscoveryStage,
     EvidenceSource,
+    NavigationTrace,
     PageSnapshot,
     ProcessingStatus,
     Signal,
@@ -146,6 +154,8 @@ class RunContext:
     browser: Browser | None = None
     settle_ms: int = 8000  # how long to wait for network idle before a snapshot
     force_mobile: bool = False  # load every site with the mobile viewport and user agent first
+    loopback_only: bool = False  # mock mode: contexts get the loopback guard
+    nav: NavigationOptions | None = None  # None: capture and judge only, no navigation agent
 
     def site_dir(self, site: Site) -> Path:
         return self.run_dir / "sites" / site.site_id
@@ -196,6 +206,7 @@ async def _open_and_snapshot(
         mobile=mobile,
         ignore_https_errors=ignore_tls,
         accept_language=settings.http.accept_language,
+        loopback_only=ctx.loopback_only,
     )
     await context.tracing.start(screenshots=True, snapshots=True)
     page = await context.new_page()
@@ -474,6 +485,8 @@ def build_result(
     notes: list[str],
     started: datetime,
     trace_path: str | None,
+    navigation: NavigationTrace | None = None,
+    identity_id: str | None = None,
 ) -> SiteResult:
     scam = analysis.classification.verdict == Verdict.SCAM
     primary = [a for a in analysis.addresses if a.tier == AddressTier.PRIMARY]
@@ -486,7 +499,8 @@ def build_result(
         addresses=primary if scam else [],
         low_confidence_addresses=low if scam else [],
         other_addresses=[] if scam else analysis.addresses,
-        navigation=None,
+        navigation=navigation,
+        identity_used=identity_id,
         notes=notes + analysis.notes,
         trace_path=trace_path,
         cost=analysis.usage.as_dict(),
@@ -576,6 +590,60 @@ async def recover_from_wayback(ctx: RunContext, site: Site) -> tuple[list[PageSn
 # ============================================================
 
 
+async def _navigate(
+    ctx: RunContext,
+    site: Site,
+    triage: TriageResult,
+    first: Analysis,
+    *,
+    partial: bool,
+    mobile: bool,
+) -> tuple[Analysis, NavigationTrace | None, str | None, list[str]]:
+    """The navigation agent, if the first judgment calls for it (DESIGN §5.5 trigger and
+    budgets), then a second judgment over everything saved: landing capture plus the agent's
+    snapshots. Any failure keeps the first judgment and says so in the notes."""
+    nav = ctx.nav
+    assert nav is not None
+    settings = ctx.settings
+    nav.spend.add(first.usage, settings.llm.judge_model)
+    if first.triage is not None:  # revised to non-content: nothing to navigate
+        return first, None, None, []
+    c = first.classification
+    seen = f"first judgment: {c.verdict.value}, p={c.scam_probability:.2f}"
+    band = (settings.classify.uncertain_band[0], settings.classify.uncertain_band[1])
+    if not (nav.force or should_navigate(c, band)):
+        return first, None, None, [f"navigation skipped ({seen}; outside the uncertain band)"]
+    if nav.stop_file is not None and nav.stop_file.exists():
+        return first, None, None, [f"navigation skipped: stop file present ({seen})"]
+    if reason := spend_blocks(nav, settings.llm.navigator_model):
+        return first, None, None, [f"navigation skipped: {reason} ({seen})"]
+    assert ctx.browser is not None
+    try:
+        run, nav_notes, identity_id = await navigate_site(
+            settings=settings,
+            run_dir=ctx.run_dir,
+            site_dir=ctx.site_dir(site),
+            site=site,
+            triage=triage,
+            browser=ctx.browser,
+            blocklist=ctx.blocklist,
+            mobile=mobile,
+            opts=nav,
+            factory=nav.mailbox_factory or mailtm_factory(ctx.proxy or ""),
+        )
+    except Exception as exc:  # noqa: BLE001 - keep the first judgment, record why
+        traceback.print_exc()
+        return first, None, None, [f"navigation failed: {type(exc).__name__}: {exc}"]
+    nav_notes = [seen, *nav_notes]
+    if run is None:
+        return first, None, identity_id, nav_notes
+    nav.spend.add(run.usage, settings.llm.navigator_model)
+    second = await analyze(ctx, site, triage, load_snapshots(ctx.site_dir(site)), partial=partial)
+    nav.spend.add(second.usage, settings.llm.judge_model)
+    total = first.usage.plus(run.usage).plus(second.usage)
+    return replace(second, usage=total), run.trace, identity_id, nav_notes
+
+
 async def process_site(ctx: RunContext, site: Site, triage: TriageResult) -> SiteResult:
     started = datetime.now(UTC)
     site_dir = ctx.site_dir(site)
@@ -585,15 +653,20 @@ async def process_site(ctx: RunContext, site: Site, triage: TriageResult) -> Sit
     notes: list[str] = []
     snapshots: list[PageSnapshot] = []
     partial = False
+    mobile = False
+    captured_live = False
 
-    is_warning_page = any(
-        s.name == "cloudflare_phishing_interstitial" for s in triage_signals(triage)
-    )
-    if triage.status == SiteStatus.LIVE or triage.status in RECHECK_STATUSES or is_warning_page:
+    if needs_visit(triage):
         capture = await capture_site(ctx, site, triage)
         notes += capture.notes
         snapshots = capture.snapshots
         partial = capture.partial
+        captured_live = True
+        mobile = (
+            ctx.force_mobile
+            or _is_mobile(ctx.settings, site.url)
+            or any("mobile viewport" in n for n in capture.notes)
+        )
         if triage.status in RECHECK_STATUSES:
             if capture.loaded and _has_content(ctx, snapshots):
                 notes.append(f"triage said {triage.status.value}; Chromium loaded the page")
@@ -612,6 +685,7 @@ async def process_site(ctx: RunContext, site: Site, triage: TriageResult) -> Sit
         triage = mark_non_content(triage, *found)
         notes.append(non_content_note(*found))
         snapshots = []
+        captured_live = False
 
     if not snapshots and ctx.settings.features.archive_fallback:
         snapshots, wayback_notes = await recover_from_wayback(ctx, site)
@@ -620,9 +694,27 @@ async def process_site(ctx: RunContext, site: Site, triage: TriageResult) -> Sit
     # Capture-time facts that rescore must keep (it re-derives everything else).
     (site_dir / "capture.json").write_text(json.dumps({"notes": notes, "partial": partial}))
     analysis = await analyze(ctx, site, triage, snapshots, partial=partial)
+    navigation: NavigationTrace | None = None
+    identity_id: str | None = None
+    if ctx.nav is not None and captured_live and snapshots:
+        analysis, navigation, identity_id, nav_notes = await _navigate(
+            ctx, site, triage, analysis, partial=partial, mobile=mobile
+        )
+        notes += nav_notes
+        (site_dir / "capture.json").write_text(
+            json.dumps({"notes": notes, "partial": partial, "identity_id": identity_id})
+        )
     processing = ProcessingStatus.PARTIAL if partial else ProcessingStatus.COMPLETED
     result = build_result(
-        site, triage, analysis, processing=processing, notes=notes, started=started, trace_path=None
+        site,
+        triage,
+        analysis,
+        processing=processing,
+        notes=notes,
+        started=started,
+        trace_path=None,
+        navigation=navigation,
+        identity_id=identity_id,
     )
     trace = _keep_trace(site_dir, result, ctx.run_dir)
     return result.model_copy(update={"trace_path": trace})
@@ -640,8 +732,44 @@ def load_checkpoint(path: Path) -> dict[str, SiteResult]:
     return {r.site.site_id: r for r in results}
 
 
+class NoSitesVisited(RuntimeError):
+    """A run that should have loaded sites loaded none (a wiring bug or a dead network)."""
+
+
+def count_visited(run_dir: Path, sites: list[Site]) -> int:
+    """Sites with at least one saved snapshot, i.e. a page that really loaded."""
+    return sum(
+        1
+        for s in sites
+        if (run_dir / "sites" / s.site_id / "snapshots.jsonl").exists()
+        and (run_dir / "sites" / s.site_id / "snapshots.jsonl").stat().st_size > 0
+    )
+
+
+def check_visited(expected: int, visited: int) -> None:
+    """Fail loudly instead of reporting a clean run (capture-1 and capture-3 both "finished"
+    without visiting anything). `expected` is how many sites the run set out to load."""
+    if expected > 0 and visited == 0:
+        raise NoSitesVisited(f"0 of {expected} sites were visited: no page loaded in this run")
+
+
+def needs_visit(triage: TriageResult) -> bool:
+    """Whether the run loads this site in a browser (live, a status worth rechecking, or a
+    browser's phishing-warning page)."""
+    is_warning_page = any(
+        s.name == "cloudflare_phishing_interstitial" for s in triage_signals(triage)
+    )
+    return triage.status == SiteStatus.LIVE or triage.status in RECHECK_STATUSES or is_warning_page
+
+
 async def run_pipeline(
-    settings: Settings, sites: list[Site], run_dir: Path, *, resume: bool
+    settings: Settings,
+    sites: list[Site],
+    run_dir: Path,
+    *,
+    resume: bool,
+    nav: NavigationOptions | None = None,
+    concurrency: int | None = None,
 ) -> list[SiteResult]:
     """Live run: triage (reused if present), then every site with bounded concurrency.
     Each finished site is appended to checkpoint.jsonl immediately."""
@@ -663,18 +791,27 @@ async def run_pipeline(
 
     llm = LLMClient(settings.llm.gateway_url)
     lock = asyncio.Lock()
-    semaphore = asyncio.Semaphore(settings.run.concurrency)
+    semaphore = asyncio.Semaphore(concurrency or settings.run.concurrency)
+    # Wall-clock cap per site. With navigation it adds the agent's own budget; with operator
+    # confirmation a person is in the loop, so only the agent's watchdog and stop file bound it.
+    site_timeout: float | None = settings.run.site_timeout_s
+    if nav is not None:
+        site_timeout = None if nav.confirm else site_timeout + nav.limits.max_seconds
     async with async_playwright() as pw:
         browser = await launch_browser(pw, proxy)
-        ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm, proxy=proxy, browser=browser)
+        ctx = RunContext(
+            settings=settings, run_dir=run_dir, llm=llm, proxy=proxy, browser=browser, nav=nav
+        )
 
-        async def one(site: Site) -> SiteResult:
+        async def one(site: Site) -> SiteResult | None:
             started = datetime.now(UTC)
+            if nav is not None and nav.stop_file is not None and nav.stop_file.exists():
+                print(f"  {site.site_id} skipped: stop file present", flush=True)
+                return None
             async with semaphore:
                 try:
                     result = await asyncio.wait_for(
-                        process_site(ctx, site, triage[site.site_id]),
-                        timeout=settings.run.site_timeout_s,
+                        process_site(ctx, site, triage[site.site_id]), timeout=site_timeout
                     )
                 except TimeoutError:
                     result = _error_result(
@@ -705,6 +842,9 @@ async def run_pipeline(
         await asyncio.gather(*(one(s) for s in todo))
         await browser.close()
     await llm.aclose()
+    check_visited(
+        sum(1 for s in todo if needs_visit(triage[s.site_id])), count_visited(run_dir, todo)
+    )
     results = load_checkpoint(checkpoint)
     return [results[s.site_id] for s in sites if s.site_id in results]
 
@@ -773,6 +913,7 @@ async def run_capture_only(
         await browser.close()
     await ctx.llm.aclose()
     (run_dir / "capture.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    check_visited(len(todo), count_visited(run_dir, todo))
     return rows
 
 
@@ -795,8 +936,13 @@ async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[
             partial=old.processing_status == ProcessingStatus.PARTIAL,
         )
         capture_file = ctx.site_dir(site) / "capture.json"
-        capture_notes = (
-            json.loads(capture_file.read_text())["notes"] if capture_file.exists() else []
+        capture_info = json.loads(capture_file.read_text()) if capture_file.exists() else {}
+        capture_notes = capture_info.get("notes", [])
+        trace_file = ctx.site_dir(site) / "agent_trace.json"
+        navigation = (
+            NavigationTrace.model_validate_json(trace_file.read_text())
+            if trace_file.exists()
+            else None
         )
         result = build_result(
             site,
@@ -806,6 +952,8 @@ async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[
             notes=capture_notes,
             started=old.started_at,
             trace_path=old.trace_path,
+            navigation=navigation,
+            identity_id=capture_info.get("identity_id"),
         )
         results.append(result)
     await llm.aclose()

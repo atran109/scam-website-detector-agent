@@ -351,6 +351,7 @@ class StopReason(StrEnum):
     BUDGET_STEPS = "budget_steps"
     BUDGET_TIME = "budget_time"
     BUDGET_TOKENS = "budget_tokens"   # per-site LLM token cap hit (added 2026-10-06)
+    USER_STOP = "user_stop"           # operator stop file, or --confirm-submit declined (added 2026-10-07)
     BLOCKED = "blocked"                   # gate we won't pass; see BlockedReason
     NO_PROGRESS = "no_progress"           # loop detected
     NOT_APPLICABLE = "not_applicable"     # site has no account/deposit concept
@@ -796,7 +797,7 @@ classify:
   uncertain_band: [0.35, 0.65]      # triggers navigation and/or second look
   scam_threshold: 0.45              # verdict = scam if fused score >= this (slight recall lean); calibrate on labels
 features:
-  wallet_mock: true
+  wallet_mock: false                 # no mock wallet in v1 (LOG 2026-10-07); not read by the policy or prompt
   qr_decode: true
   ocr: false
   archive_fallback: true            # Wayback recovery for non-live sites (§5.2a)
@@ -961,7 +962,7 @@ For each page state, `capture.py` produces a `PageSnapshot`:
 4. **Robust snapshots:** each artifact is saved independently. Playwright's screenshot waits for web fonts, which hang on many scam pages (6 of 18 pilot sites), so it falls back to CDP `Page.captureScreenshot`; a snapshot without an image is still recorded and the judge then gets text only. Highlight screenshots are only taken when the address is actually visible in the viewport (not in a hidden panel).
 5. **Tracing:** for sites that end up classified as scam, or that fail, keep a Playwright trace (`context.tracing`, saved as `trace.zip`). It opens in Playwright's Trace Viewer with a step-by-step timeline, DOM snapshots, screenshots, and network requests including response bodies. Clean sites discard theirs to save disk. This gives reviewers replayable evidence locally, the same thing Browserbase's cloud session recordings would offer, without sending traffic through a third party.
 
-**The mock wallet:** `wallet_mock.js` defines `window.ethereum` with `isMetaMask: true`. It answers `eth_requestAccounts` with a dummy account and records every `eth_sendTransaction` / `eth_signTypedData` / `approve` request instead of signing. A drainer's request reveals the attacker's recipient or spender address, which becomes a sighting with source `wallet_mock`. Nothing is ever signed, because there's no key.
+**The mock wallet:** `wallet_mock.js` defines `window.ethereum` with `isMetaMask: true`. It answers `eth_requestAccounts` with a dummy account and records every `eth_sendTransaction` / `eth_signTypedData` / `approve` request instead of signing. **Not built in v1 (LOG 2026-10-07: 1 of 56 live sites is wallet-gated; README "With more time"); this describes the design if it is added.** A drainer's request reveals the attacker's recipient or spender address, which becomes a sighting with source `wallet_mock`. Nothing is ever signed, because there's no key.
 
 ### 5.4 Extraction and classification
 
@@ -1036,7 +1037,8 @@ snapshot ─► patterns.py   finds candidates in: visible text, attributes, scr
 - **Several calls in one reply (decided 2026-10-06).** A reply may carry several `fill`/`select` calls followed by at most one other action (typically the submit click). Each is policy-checked on its own, in order; the batch stops at the first refusal or failure. A *step* is one model reply.
 - **Gates.** A refusal that names a gate (`wallet_required`, `kyc`, `payment_required`, `captcha`) goes back to the model, which ends the run with `done(blocked_at=…)`. Gates are also seen in code: a CAPTCHA widget on the page, and gate wording after a submit ("invalid invitation code", "SMS code required", "not available in your country"). Each step message carries one line, "Gates seen so far: …". If the run ends another way with no deposit address, the most recent gate seen becomes `blocked_at`.
 - **History.** The model sees the last 12 *steps*, one line each (all of a batch's actions and results on one line), so a repeated cycle is visible to it.
-- **Wallet.** Connect-wallet clicks are allowed only when the mock wallet is injected (it refuses to sign and logs requested recipients); sign/approve stay blocked even then. The mock wallet is deferred until after the M3 pilot: until it exists, connect-wallet clicks are blocked and a site that needs a wallet ends with `blocked_at: wallet_required`. Wallet-gated sites are tallied in the pilot, and the mock wallet is built if there are several.
+- **Wallet.** Connect-wallet clicks are allowed only when the mock wallet is injected (it refuses to sign and logs requested recipients); sign/approve stay blocked even then. **The mock wallet is out of v1 (decided 2026-10-07: 1 of 56 live sites is wallet-gated)**: connect-wallet clicks are always blocked and a site that needs a wallet ends with `blocked_at: wallet_required`.
+- **On real sites (`agent/site_run.py`, wired 2026-10-07).** `process_site` runs capture, a first judgment, then the navigator if the verdict is scam or the probability is in `classify.uncertain_band` (and the page had content and came from a live capture, not Wayback), then a second judgment over the landing capture plus the agent's snapshots. The agent gets its own context (desktop or phone as capture chose), a mail.tm inbox through the egress proxy, and the registrable domain it landed on as the only place it may go. Operator controls: a stop file (`runs/<id>/STOP`; checked every second, ends the run mid-call with `user_stop`, and later sites in the run are skipped), and `--confirm-submit` (one question per site, before the first click or key press that follows a fill; the answer's wait is not charged to the wall-clock budget; no answer counts as no; forces one site at a time and removes the per-site timeout, since a person is in the loop). A session spend cap (estimated, USD) stops new navigations when one more site's worst case could cross it. A run that should have loaded sites and loaded none fails with an error.
 - **No tool call.** A model reply with text and no tool call counts as a failed step (toward `max_consecutive_failures`).
 - Budgets: max steps; max seconds as a hard **wall-clock** limit enforced by a watchdog that cancels the run mid-call (decided 2026-10-06: a sleeping host paused the monotonic clock and a 10-minute API stall went past the old between-steps check); a per-request gateway timeout (navigator 60 s, 2 retries); a hard per-site token cap in code (`BUDGET_TOKENS`); loop detection (same URL + same action 3 times → `NO_PROGRESS`); and page-cycle detection (the same 2–6 pages in the same order: a warning to the model at 3 repeats, `NO_PROGRESS` at 4, with the gate fallback). A smaller step budget is considered for `fake_shop` sites (shops rarely have deposit flows).
 

@@ -10,6 +10,7 @@ from scamhunter.config import REPO_ROOT, Settings, load_settings
 from scamhunter.models import Site, SiteResult
 from scamhunter.pipeline import (
     PIPELINE_VERSION,
+    NoSitesVisited,
     apply_sibling_signals,
     load_checkpoint,
     load_sites,
@@ -49,9 +50,29 @@ def _finalize(results: Sequence[SiteResult], settings: Settings, run_id: str) ->
     )
 
 
+def _selected(args: argparse.Namespace) -> list[Site]:
+    """The sites a command works on; an empty selection is an error, not a clean no-op."""
+    sites = _select(load_sites(URLS_PATH), args.only)
+    if not sites:
+        raise SystemExit(f"error: --only {args.only!r} matches no site in data/urls.txt")
+    return sites
+
+
+async def ask_operator(question: str) -> bool:
+    """--confirm-submit: show what is about to happen and wait for the operator. Enter = go
+    ahead; n = stop this site. No terminal (end of input) counts as no."""
+    print("\n=== CONFIRM BEFORE FIRST SUBMIT ===\n" + question, flush=True)
+    try:
+        answer = await asyncio.to_thread(input, "Enter = go ahead, n = stop this site > ")
+    except EOFError:
+        print("(no terminal to answer on: stopping this site)", flush=True)
+        return False
+    return answer.strip().lower() not in {"n", "no", "stop"}
+
+
 def cmd_triage(args: argparse.Namespace) -> int:
     settings = load_settings()
-    sites = _select(load_sites(URLS_PATH), args.only)
+    sites = _selected(args)
     out = run_dir(args.run_id or new_run_id())
     print(f"Triage of {len(sites)} URLs → {out}/triage.jsonl")
     records = asyncio.run(run_triage(settings, sites, out))
@@ -62,26 +83,71 @@ def cmd_triage(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    from scamhunter.agent.loop import AgentLimits
+    from scamhunter.llm.client import LLMClient
+
     settings = load_settings()
-    sites = _select(load_sites(URLS_PATH), args.only)
+    sites = _selected(args)
     run_id = args.run_id or new_run_id()
     out = run_dir(run_id)
     if args.triage_from and not (out / "triage.jsonl").exists():
         shutil.copyfile(RUNS_DIR / args.triage_from / "triage.jsonl", out / "triage.jsonl")
-    results = asyncio.run(run_pipeline(settings, sites, out, resume=args.resume))
+    concurrency = 1 if args.confirm_submit else args.concurrency
+    llm = None
+    nav = None
+    if settings.agent.enabled and not args.no_agent:
+        from scamhunter.agent.site_run import NavigationOptions
+
+        # The navigator's client waits 200 s with one retry (the gateway gives up after 3 x 60 s).
+        llm = LLMClient(settings.llm.gateway_url, timeout_s=200, retries=1)
+        stop_file = out / "STOP"
+        nav = NavigationOptions(
+            limits=AgentLimits.from_settings(
+                settings.agent,
+                max_steps=args.max_steps or settings.agent.max_steps,
+                max_seconds=args.max_seconds or settings.agent.max_seconds,
+            ),
+            llm=llm,
+            stop_file=stop_file,
+            confirm=ask_operator if args.confirm_submit else None,
+            spend_cap_usd=args.spend_cap,
+            progress=lambda line: print(f"    {line}", flush=True),
+        )
+        print(
+            f"navigator on (max {nav.limits.max_steps} steps, {nav.limits.max_seconds} s per site"
+            f"{f', session cap ${args.spend_cap:.2f}' if args.spend_cap else ''}"
+            f"{', confirm before first submit' if args.confirm_submit else ''}); "
+            f"stop everything with: touch runs/{run_id}/STOP",
+            flush=True,
+        )
+    try:
+        results = asyncio.run(
+            run_pipeline(settings, sites, out, resume=args.resume, nav=nav, concurrency=concurrency)
+        )
+    except NoSitesVisited as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if nav is not None:
+        print(f"estimated LLM spend this run: ${nav.spend.usd:.2f}")
     _finalize(results, settings, run_id)
     return 0
 
 
 def cmd_capture(args: argparse.Namespace) -> int:
     settings = load_settings()
-    sites = _select(load_sites(URLS_PATH), args.only)
+    sites = _selected(args)
     out = run_dir(args.run_id or new_run_id())
     if not (out / "triage.jsonl").exists():
         shutil.copyfile(RUNS_DIR / args.triage_from / "triage.jsonl", out / "triage.jsonl")
-    rows = asyncio.run(
-        run_capture_only(settings, sites, out, settle_ms=args.settle_ms, force_mobile=args.mobile)
-    )
+    try:
+        rows = asyncio.run(
+            run_capture_only(
+                settings, sites, out, settle_ms=args.settle_ms, force_mobile=args.mobile
+            )
+        )
+    except NoSitesVisited as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     errors = [r for r in rows if "error" in r]
     print(f"\n{len(rows)} captured, {len(errors)} errors → {out}/capture.jsonl")
     return 0
@@ -179,6 +245,47 @@ def cmd_agent_mock(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pipeline_mock(args: argparse.Namespace) -> int:
+    """The mock variants through `process_site`, not the step-E harness. Mock mode only."""
+    import logging
+
+    from scamhunter.agent.loop import AgentLimits
+    from scamhunter.llm.client import LLMClient
+    from scamhunter.mock_mode import GATED_VARIANTS, SOLVABLE_VARIANTS, evaluate_pipeline_on_mock
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    settings = load_settings()
+    all_variants = [*SOLVABLE_VARIANTS, *GATED_VARIANTS]
+    variants = all_variants if args.variants == "all" else args.variants.split(",")
+    if unknown := set(variants) - set(all_variants):
+        print(f"unknown variants: {sorted(unknown)}")
+        return 1
+    limits = AgentLimits.from_settings(
+        settings.agent, max_steps=args.max_steps, max_seconds=args.max_seconds
+    )
+    out = run_dir(args.run_id or new_run_id())
+
+    async def go() -> list[dict]:
+        llm = LLMClient(settings.llm.gateway_url, timeout_s=200, retries=1)
+        try:
+            return await evaluate_pipeline_on_mock(
+                variants, out, settings, limits, llm, args.spend_cap
+            )
+        finally:
+            await llm.aclose()
+
+    rows = asyncio.run(go())
+    print(f"\n{out / 'pipeline_mock' / 'summary.json'}")
+    for r in rows:
+        print(
+            f"  {r['variant']:<16} {'PASS' if r.get('passed') else 'FAIL'}  steps {r.get('steps')}"
+            f"  {r.get('found')}  verdict {r.get('verdict')}  out {r.get('output_correct')}/"
+            f"{r.get('output_addresses')}  blocked_at {r.get('result_blocked_at')}"
+            f"  ${r['site_cost_usd']:.3f}"
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="scamhunter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -192,7 +299,18 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
     run.add_argument("--resume", action="store_true", help="skip sites already checkpointed")
     run.add_argument("--triage-from", help="reuse triage.jsonl from another run id")
-    run.add_argument("--no-agent", action="store_true", help="skip navigation (M3)")
+    run.add_argument("--no-agent", action="store_true", help="capture and judge only, no navigator")
+    run.add_argument(
+        "--confirm-submit",
+        action="store_true",
+        help="ask before the first form submission on each site (forces one site at a time)",
+    )
+    run.add_argument("--max-steps", type=int, help="navigator steps per site (settings default)")
+    run.add_argument("--max-seconds", type=int, help="navigator wall-clock per site")
+    run.add_argument(
+        "--spend-cap", type=float, help="session cap in USD for navigation (estimated)"
+    )
+    run.add_argument("--concurrency", type=int, help="sites at once (settings default)")
 
     capture = sub.add_parser(
         "capture", help="landing capture of live sites only (no agent/clicks/LLM)"
@@ -219,6 +337,14 @@ def main(argv: list[str] | None = None) -> int:
     mock.add_argument("--max-steps", type=int, default=35)
     mock.add_argument("--max-seconds", type=int, default=600)
     mock.add_argument("--resume", action="store_true", help="keep runs already in summary.json")
+    pmock = sub.add_parser(
+        "pipeline-mock", help="mock variants through process_site, the real-site path (M3)"
+    )
+    pmock.add_argument("--run-id", help="run directory name (default: timestamp)")
+    pmock.add_argument("--variants", default="all", help="comma-separated, or 'all'")
+    pmock.add_argument("--spend-cap", type=float, default=5.0, help="USD for the whole session")
+    pmock.add_argument("--max-steps", type=int, default=30)
+    pmock.add_argument("--max-seconds", type=int, default=300)
     review = sub.add_parser("review", help="read-only HTML review page from saved evidence")
     review.add_argument("--run-id", required=True)
     sub.add_parser("eval", help="not implemented yet (M4)")
@@ -232,6 +358,7 @@ def main(argv: list[str] | None = None) -> int:
         "report": cmd_report,
         "review": cmd_review,
         "agent-mock": cmd_agent_mock,
+        "pipeline-mock": cmd_pipeline_mock,
     }
     if args.command in handlers:
         return handlers[args.command](args)

@@ -32,6 +32,17 @@ class TokenUsage:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
 
+    def plus(self, other: "TokenUsage") -> "TokenUsage":
+        """A new total of two usages (a site's judgments and its navigation)."""
+        return TokenUsage(
+            self.tokens_in + other.tokens_in,
+            self.tokens_out + other.tokens_out,
+            self.llm_calls + other.llm_calls,
+            self.cached_calls + other.cached_calls,
+            self.cache_read_tokens + other.cache_read_tokens,
+            self.cache_write_tokens + other.cache_write_tokens,
+        )
+
     def add(self, usage: dict[str, int], cached: bool) -> None:
         self.llm_calls += 1
         if cached:  # answered from the gateway's response cache: no tokens spent
