@@ -88,6 +88,7 @@ endif
 # site, $5 session cap, one site at a time, navigation forced (the trigger is not under test),
 # confirm before each site's first form submission, in the order below. Stop everything with:
 # touch runs/<run id>/STOP. Full selftest first (via `run`). Needs a terminal for the prompts.
+# Always pass a NEW RUN_ID (or none); continue a run with PILOT_ARGS=--resume.
 PILOT_SITES ?= 027,055,145,012,021,128,071,117
 pilot:
 	$(MAKE) run ARGS="--only $(PILOT_SITES) --force-navigation --confirm-submit --max-steps 30 --max-seconds 300 --spend-cap 5 $(PILOT_ARGS)"

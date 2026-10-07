@@ -118,3 +118,17 @@ def test_only_keeps_the_order_given() -> None:
 
     sites = load_sites(URLS_PATH)
     assert [s.site_id for s in _select(sites, "27,55,145,12")] == ["027", "055", "145", "012"]
+
+
+def test_run_refuses_an_existing_run_directory_without_resume(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    import scamhunter.cli as cli
+
+    (tmp_path / "checkpoint.jsonl").write_text("{}\n")
+    monkeypatch.setattr(cli, "run_dir", lambda run_id: tmp_path)
+    args = argparse.Namespace(
+        only="27", run_id="pilot-1", resume=False, triage_from=None, no_agent=True
+    )
+    assert cli.cmd_run(args) == 1
+    assert "already holds a run" in capsys.readouterr().err

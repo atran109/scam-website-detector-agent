@@ -91,6 +91,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     sites = _selected(args)
     run_id = args.run_id or new_run_id()
     out = run_dir(run_id)
+    if (out / "checkpoint.jsonl").exists() and not args.resume:
+        # A reused id would append to the old checkpoint and delete the old evidence of any
+        # site it visits again (2026-10-07: `RUN_ID=pilot-1` hit the 2026-10-04 run).
+        print(
+            f"error: runs/{run_id} already holds a run; pick a new --run-id, or pass --resume "
+            "to continue it",
+            file=sys.stderr,
+        )
+        return 1
     if args.triage_from and not (out / "triage.jsonl").exists():
         shutil.copyfile(RUNS_DIR / args.triage_from / "triage.jsonl", out / "triage.jsonl")
     concurrency = 1 if args.confirm_submit else args.concurrency
