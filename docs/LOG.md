@@ -1047,3 +1047,15 @@ Cut or deferred, not to be built now: the mock wallet (out of v1, README), cross
 - **Next step for the user:** `runs/capture-2/review/labels_todo.csv` lists the 33 live sites that count and have no label (43 effective live minus your 10), blind (no pipeline verdict shown); the full review page is `runs/capture-2/review/index.html` (open it from that folder). 17 more verdict labels (scam or not_scam) reach 25.
 - **Rubric table in DESIGN §5.4** (25 signals with tier, weight and trigger, plus the fusion formula): `tests/test_rubric_doc.py` fails if the code emits a signal the table lacks, if a text rule's tier or weight differs, or if the table has a row the code does not emit. PLAN M4 boxes ticked: rubric, hard rules, classifier outputs, uncertain band, re-classify after navigation, the two new signals, the non-English random-name check.
 - Still open in M4: the labels and the numbers on them (user), the verdict-threshold tuning, the dead-site policy calibration, the signals-only rule (needs the full live run, M6) and the navigation trigger (user's decision).
+
+## 2026-10-07 18:30 · H+? · OPEN DECISION, data for the user [future]: the navigation trigger (nothing changed)
+On the 43 effective live sites of `capture-2` (classified from saved evidence, 18:00 entry; landing-page buckets from `eval/live_tally.py`):
+| rule | navigates | skips |
+|---|---|---|
+| **A** verdict-based, today: `p >= 0.35` (scam or uncertain) | 32 | 11 |
+| **B** account flow on the landing page: registration-gated, wallet-gated or an address on landing | 33 | 10 |
+| **A or B** | **37** | **6** |
+- **A skips 11:** 003 (**likely scam**, p=0.22), 022, 070, 082 (registration-gated, p 0.14–0.20), 031 and 078 (token pages with addresses, p=0.32), 051, 081, 102 (the three probably-legitimate shops), 053 and 091 (memecoins). **B skips 10 and misses the live scams that A catches**: 067, 071, 117 and 145 (landing text shows no login or register wording: 145's entry is an account icon, 117 is a download page, 071 a loader), plus 003, the shops and memecoins. **A or B skips only 6**: 003, 051, 081, 102, 053, 091: a consultancy page, three ordinary shops and two memecoin pages.
+- What navigation found on the labelled sites that A navigated: 145 reached the registration form and a named gate; 071 and 117 had nothing behind them (a loader, an app-download page); 012 (not in this table: p=0.96) gave three addresses. B alone would have skipped 145's gate finding.
+- **Cost of the union over A:** 5 more sites (022, 031, 070, 078, 082) at about $0.05–0.22 each from the gateway log (the pilot's three-site rerun cost $0.35 in total), so about $0.5 on a 43-site live set.
+- **Recommendation (not applied):** A or B, i.e. keep the verdict test (it catches scam-looking pages with no visible account control) and add the account-flow signal (it catches low-probability sites with a login or register control). `--force-navigation` stays for hand-picked runs. "Crypto signals" as a third leg (coin names, deposit wording on the page) was not measured. **003, a likely scam at p=0.22, is skipped by every rule here;** it needs a better verdict, not a trigger.
