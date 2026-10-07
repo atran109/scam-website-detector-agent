@@ -1065,3 +1065,14 @@ On the 43 effective live sites of `capture-2` (classified from saved evidence, 1
 - Every solvable variant found the correct **6/6** addresses and produced a scam verdict. Every gated variant stopped at the correct reason (`invite_code`, `sms_verification`, `captcha`, or `wallet_required`).
 - Safety and correctness: no forbidden requests, loopback-guard hits, wrong primary addresses, or unsafe linked domains. `app_domain` and `self_redirect` recorded only their expected linked target. The `image_captcha` variant exercised one policy refusal and ended at `captcha`.
 - This closes the regression requested after the pilot fixes. The run artifact remains in ignored `runs/pmock-3/`.
+
+## 2026-10-07 19:10 · H+? · DECISION [arch] (M4): navigate on verdict OR landing-page account flow
+- Adopt the 18:30 recommendation: navigate when the first verdict is scam/uncertain **or** the landing evidence has login/register/account-menu wording, a wallet gate, or an extracted address. Keep `--force-navigation` for selected investigations.
+- On `capture-2` this selects 37 of 43 effective live sites, five more than the old verdict-only trigger (022, 031, 070, 078, 082), for an estimated additional cost of about $0.50. It retains 067, 071, 117 and 145, which an account-flow-only rule would miss.
+- Rejected: account-flow alone (misses scam-looking funnels with hidden controls) and crypto wording as a third leg (too broad and not measured). Site 003 remains a classifier miss rather than a navigation-trigger problem.
+
+## 2026-10-07 19:20 · H+? · RESULT [limit] (M4): 25-label evaluation complete; threshold stays 0.45
+- Added 17 manual labels from `capture-2`'s saved screenshots and text, without revisiting a site, to the user's existing 8: 25 total (22 scam, 3 not_scam). The added scams were the clearest investment/HYIP, exchange-kit, impersonation, gambling-app and task-commerce pages; ambiguous shops and token projects were not used merely to fill the quota.
+- `make eval RUN=capture-2`: at both 0.45 and 0.5, TP 21, FP 0, FN 1, TN 3: **precision 100%, recall 95%, F1 98%, accuracy 96%**. The only miss is 003 at p=0.22, whose original human note already says the domain/content mismatch is suspicious but the page alone is inconclusive.
+- **Decision:** keep the documented 0.45 recall lean. The measured outcomes are identical at 0.45 and 0.5, while lowering the threshold enough to catch 003 would be an unsupported jump and would sweep in unrelated token/shop pages. Report both thresholds in the README.
+- Added 012's three expected deposit addresses from the saved pilot evidence so address recall can be evaluated on the navigation run separately from capture-only verdict accuracy.

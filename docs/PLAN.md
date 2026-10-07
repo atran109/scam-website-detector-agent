@@ -120,16 +120,16 @@ Adjust the hours to the real schedule.
 - [x] Hard rules first (seed-phrase field, Cloudflare phishing interstitial, parked/empty → dead-site policy)
 - [x] Classifier returns label, scam type, confidence, reasons, evidence references (signals with evidence, judge's quoted evidence, address sightings with screenshots)
 - [x] Internal `uncertain` band (`classify.uncertain_band` 0.35–0.65: navigation trigger and review), mapped to the binary label by `scam_threshold`
-- [ ] Verdict bias: `scam_threshold: 0.45` (lean toward recall); report precision/recall at 0.45 and 0.5 in the README
+- [x] Verdict bias: keep `scam_threshold: 0.45`; the 25-label set gives the same 100% precision / 95% recall at 0.45 and 0.5 (LOG 2026-10-07 19:20)
 - [x] App-download targets as evidence (fix 8, LOG 2026-10-07 16:30): `extract/app_downloads.py`, output field `app_download_urls`, never fetched. The mobile-UA capture variant is cut
-- [ ] Decide the navigation trigger (open decision of 2026-10-07 03:10): account-flow or crypto signals instead of verdict-based
+- [x] Navigation trigger: scam/uncertain verdict **or** landing-page account flow, wallet gate or address (union chosen from the 43-site comparison; LOG 2026-10-07 19:10)
 - [x] Re-classify after navigation with the new evidence (`analyze` second pass: landing + best navigation page; LOG 2026-10-07 08:50)
 - [ ] Dead-site policy in the scorer: Wayback shrink factor, signals-only band (0.5–0.65), `evidence_source` on every record; calibrate on hand labels incl. dead sites
 - [ ] **Decide the signals-only rule** (numbers in LOG 2026-10-05). `finance_terms_in_domain` no longer counts for dead sites (done); now 47 of 60 dead-site scam verdicts rest on weak signals only. Do NOT pick (a) "≥1 moderate" or (b) "≥3 weak" yet: after the full live run, compute the scam base rate on live sites and each signal's scam/legit ratio on live sites, and propose the rule from those. Re-run the count after the Chromium rechecks, Wayback and the sibling pass
 - [x] **New signal: mobile exchange template** (done 2026-10-07: at least 4 distinct menu words; fires on 057, 099, 100; not 055 or 128). Original note: Menu cluster (Recharge, Withdraw, Finance, Loan, Service, Contract, Assets, Team, Chat Room, "AI Quant", "Follow") plus a forced Connect Wallet modal. Pilot evidence: #100 matches 9 of 12 words, #057 six, #055 only the modal; #027 (a token project) shares generic words (Contract, Follow, Team, Assets), so require a cluster of the distinctive words (Recharge/Withdraw/Finance/Loan/Service/AI Quant/Chat Room/Connect Wallet), not any one. Also covers the sites whose heuristic score stays low today (#055, #057, #100, #128)
 - [x] **New signal: domain/content mismatch** (done 2026-10-07: weak, fires on 003, 071, 145 of the labelled, none of the 3 legitimate shops). Original note: (e.g. #003: `addmklwhisky.com` serves a Chinese immigration-service site). Not built yet and not logged as deferred before 2026-10-05 (DESIGN §5.4 lists "mismatched branding" but no code implements it). Options: deterministic (no alphabetic token ≥4 letters of the domain appears in the page title or text), and/or a `domain_content_mismatch` boolean in the judge's output schema
 - [x] Random-looking-domain check is English-only (letter-pair table): checked (none of the 30 flagged is a legitimate non-English name; open-syllable names such as pinyin are now exempt from the letter-pair test; LOG 2026-10-07 17:20)
-- [ ] Hand-label 20-30 sites in `eval/labels.csv` **from saved screenshots and text** (not by revisiting live sites); measure accuracy/precision/recall; tune via `make rescore`
+- [x] Hand-label 25 sites in `eval/labels.csv` **from saved screenshots and text** (no revisits); 100% precision, 95% recall, 96% accuracy at both 0.45 and 0.5 on `capture-2`
 
 ### M5. Full hardening
 

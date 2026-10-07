@@ -724,8 +724,22 @@ async def _navigate(
     c = first.classification
     seen = f"first judgment: {c.verdict.value}, p={c.scam_probability:.2f}"
     band = (settings.classify.uncertain_band[0], settings.classify.uncertain_band[1])
-    if not (nav.force or should_navigate(c, band)):
-        return first, None, None, [f"navigation skipped ({seen}; outside the uncertain band)"]
+    landing_snapshots = load_snapshots(ctx.site_dir(site))
+    landing_text = (
+        load_snapshot_content(landing_snapshots[-1], ctx.run_dir).visible_text
+        if landing_snapshots
+        else ""
+    )
+    if not (
+        nav.force
+        or should_navigate(c, band, landing_text=landing_text, has_address=bool(first.addresses))
+    ):
+        return (
+            first,
+            None,
+            None,
+            [f"navigation skipped ({seen}; no scam/uncertain verdict or account flow)"],
+        )
     if nav.stop_file is not None and nav.stop_file.exists():
         return first, None, None, [f"navigation skipped: stop file present ({seen})"]
     if reason := spend_blocks(nav, settings.llm.navigator_model):

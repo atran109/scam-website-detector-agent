@@ -7,6 +7,7 @@ the optional submit confirmation are the operator's controls (`NavigationLoop`).
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,7 +28,7 @@ from scamhunter.agent.loop import (
     Mailbox,
     NavigationLoop,
 )
-from scamhunter.agent.policy import Policy, registrable
+from scamhunter.agent.policy import WALLET_CONNECT, Policy, registrable
 from scamhunter.agent.prompts import GOAL, system_prompt
 from scamhunter.browser.nav_guard import PageNavigationGuard
 from scamhunter.browser.sandbox import new_context
@@ -38,6 +39,12 @@ from scamhunter.models import Classification, Identity, Site, TriageResult, Verd
 
 log = logging.getLogger(__name__)
 MAILBOX_ATTEMPTS = 3  # creating the inbox: tries, with 2 s and 4 s waits between them
+ACCOUNT_FLOW = re.compile(
+    r"\b(?:log ?in|sign ?in|sign ?up|register|create (?:an )?account|recharge|withdraw|"
+    r"assets|my account|deposit)\b|\u767b\u5f55|\u767b\u9304|\u6ce8\u518c|\u8a3b\u518a|"
+    r"\u5145\u503c|\u63d0\u73fe",
+    re.I,
+)
 
 # (identity, mailbox, close) for one site. Real runs use mail.tm through the egress proxy; the
 # mock regression plugs in the mock exchange's inbox.
@@ -79,11 +86,25 @@ def worst_case_usd(limits: AgentLimits, model: str) -> float:
     return (limits.max_tokens_in * price_in + limits.max_tokens_out * price_out) / 1_000_000
 
 
-def should_navigate(c: Classification, uncertain_band: tuple[float, float]) -> bool:
-    """DESIGN trigger "scam_or_uncertain": a scam verdict, or a probability in the uncertain
-    band. A confident not_scam has no deposit flow worth the cost."""
+def should_navigate(
+    c: Classification,
+    uncertain_band: tuple[float, float],
+    *,
+    landing_text: str = "",
+    has_address: bool = False,
+) -> bool:
+    """Navigate a scam/uncertain verdict or a landing page with an account/deposit flow.
+
+    The union keeps scam-looking pages with hidden account controls while also reaching low-scored
+    login flows and pages that already expose an address (LOG 2026-10-07 18:30)."""
     low, high = uncertain_band
-    return c.verdict == Verdict.SCAM or low <= c.scam_probability <= high
+    verdict_trigger = c.verdict == Verdict.SCAM or low <= c.scam_probability <= high
+    account_trigger = (
+        has_address
+        or bool(ACCOUNT_FLOW.search(landing_text))
+        or bool(WALLET_CONNECT.search(landing_text))
+    )
+    return verdict_trigger or account_trigger
 
 
 def spend_blocks(opts: NavigationOptions, model: str) -> str | None:

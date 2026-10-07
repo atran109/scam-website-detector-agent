@@ -47,6 +47,30 @@ def test_navigation_trigger(probability: float, expected: bool) -> None:
     assert should_navigate(classification(probability), BAND) is expected
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Register",
+        "Sign in securely",
+        "Recharge\nWithdraw\nAssets",
+        "\u767b\u5f55 \u5145\u503c",
+        "Connect Wallet",
+    ],
+)
+def test_account_flow_navigates_even_with_a_low_probability(text: str) -> None:
+    assert should_navigate(classification(0.1), BAND, landing_text=text)
+
+
+def test_an_address_on_the_landing_page_triggers_navigation_for_coverage() -> None:
+    assert should_navigate(classification(0.1), BAND, has_address=True)
+
+
+def test_a_low_probability_content_page_without_an_account_flow_is_skipped() -> None:
+    assert not should_navigate(
+        classification(0.1), BAND, landing_text="About our consultancy and services"
+    )
+
+
 def options(cap: float | None, spent: float = 0.0) -> NavigationOptions:
     limits = AgentLimits(
         max_steps=30, max_seconds=300, max_consecutive_failures=4, target_assets=()

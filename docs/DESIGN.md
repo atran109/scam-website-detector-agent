@@ -780,7 +780,7 @@ agent:
   max_steps: 25
   max_seconds: 180
   max_consecutive_failures: 4       # then stop with blocked_at / no_progress
-  trigger: "scam_or_uncertain"      # when to navigate
+  trigger: "scam_or_uncertain_or_account_flow"  # union chosen after the pilot (LOG 18:30/19:10)
   target_assets: [BTC, ETH, USDT-ERC20, USDT-TRC20, USDC-ERC20, USDC-TRC20]
 triage:
   concurrency: 20                   # plain HTTP, so higher than the browser stages
