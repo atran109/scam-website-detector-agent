@@ -1135,3 +1135,7 @@ On the 43 effective live sites of `capture-2` (classified from saved evidence, 1
   alternatives, pilot fixes, troubleshooting and future work. Stale PLAN boxes were closed or
   explicitly marked cut. `make check`: **650 passed**, 47 browser tests deselected (the last full
   browser suite was 47/47 in the M5 gate).
+- Clean-checkout test at commit `9fd6ee4`: local clone into `/private/tmp`, create its own Python
+  3.12 environment from pinned dependencies, then lint and **650 tests pass**. CLI help works,
+  `docker compose config` accepts the copied empty `.env.example`, and the committed output loads
+  as 160 strict-schema records. A live selftest was intentionally not started with an empty API key.
