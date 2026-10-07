@@ -1040,6 +1040,48 @@ def original_triage(run_dir: Path) -> dict[str, TriageResult]:
     return out
 
 
+async def classify_from_evidence(
+    settings: Settings, sites: list[Site], run_dir: Path
+) -> list[SiteResult]:
+    """Judge every site from the evidence a run saved, with no checkpoint needed: for a
+    capture-only run (`scamhunter capture`), which saved snapshots and no verdicts. Sites with
+    no snapshots (dead, or not captured) take the dead-site policy without Wayback. Nothing is
+    visited and the navigation agent does not run; the checkpoint written here lets `rescore`,
+    `report` and `review` work on the run afterwards."""
+    triage = load_triage(run_dir / "triage.jsonl")
+    llm = LLMClient(settings.llm.gateway_url)
+    ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm)
+    semaphore = asyncio.Semaphore(settings.run.concurrency)
+
+    async def one(site: Site) -> SiteResult:
+        started = datetime.now(UTC)
+        async with semaphore:
+            snapshots = load_snapshots(ctx.site_dir(site))
+            analysis = await analyze(ctx, site, triage[site.site_id], snapshots)
+        capture_file = ctx.site_dir(site) / "capture.json"
+        notes = json.loads(capture_file.read_text())["notes"] if capture_file.exists() else []
+        print(
+            f"  {site.site_id} {analysis.classification.verdict.value:<8} "
+            f"p={analysis.classification.scam_probability:.2f} "
+            f"{analysis.classification.evidence_source.value:<12} {site.url}",
+            flush=True,
+        )
+        return build_result(
+            site,
+            triage[site.site_id],
+            analysis,
+            processing=ProcessingStatus.COMPLETED,
+            notes=notes,
+            started=started,
+            trace_path=None,
+        )
+
+    results = await asyncio.gather(*(one(s) for s in sites if s.site_id in triage))
+    await llm.aclose()
+    write_jsonl(run_dir / "checkpoint.jsonl", results)
+    return list(results)
+
+
 async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[SiteResult]:
     """Re-run extraction + classification from saved evidence. No site is visited."""
     checkpoint = load_checkpoint(run_dir / "checkpoint.jsonl")

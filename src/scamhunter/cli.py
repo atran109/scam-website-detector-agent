@@ -13,6 +13,7 @@ from scamhunter.pipeline import (
     PIPELINE_VERSION,
     NoSitesVisited,
     apply_sibling_signals,
+    classify_from_evidence,
     load_checkpoint,
     load_sites,
     rescore,
@@ -182,6 +183,20 @@ def cmd_capture(args: argparse.Namespace) -> int:
         return 1
     errors = [r for r in rows if "error" in r]
     print(f"\n{len(rows)} captured, {len(errors)} errors → {out}/capture.jsonl")
+    return 0
+
+
+def cmd_classify(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    sites = _selected(args)
+    out = run_dir(args.run_id)
+    if not (out / "triage.jsonl").exists():
+        print(f"error: runs/{args.run_id} has no triage.jsonl", file=sys.stderr)
+        return 1
+    usage_from = count_lines()
+    results = asyncio.run(classify_from_evidence(settings, sites, out))
+    usage = _report_gateway_usage(out, usage_from, {s.site_id for s in sites})
+    _finalize(results, settings, args.run_id, usage.model_dump())
     return 0
 
 
@@ -368,6 +383,12 @@ def main(argv: list[str] | None = None) -> int:
         "--triage-from", default="triage-1", help="run id whose triage.jsonl to use"
     )
 
+    classify = sub.add_parser(
+        "classify", help="judge every site from a run's saved evidence (no visits, no agent)"
+    )
+    classify.add_argument("--run-id", required=True)
+    classify.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
+
     for name, help_text in (
         ("rescore", "re-classify a run from saved evidence (no visits)"),
         ("report", "publish a run's results into output/"),
@@ -402,6 +423,7 @@ def main(argv: list[str] | None = None) -> int:
         "triage": cmd_triage,
         "run": cmd_run,
         "capture": cmd_capture,
+        "classify": cmd_classify,
         "rescore": cmd_rescore,
         "report": cmd_report,
         "review": cmd_review,

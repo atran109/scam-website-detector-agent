@@ -9,7 +9,7 @@ RUN_ID ?= $(shell date +%Y-%m-%dT%H-%M-%S)
 ROUTER_IP ?= $(shell route -n get default 2>/dev/null | awk '/gateway:/{print $$2}')
 COMPOSE := RUN_ID=$(RUN_ID) SELFTEST_ROUTER_IP=$(ROUTER_IP) docker compose
 
-.PHONY: agent-mock pipeline-mock pilot review build selftest triage run capture rescore eval report test test-browser lint check venv down
+.PHONY: agent-mock pipeline-mock pilot review build selftest triage run capture classify rescore eval report test test-browser lint check venv down
 
 $(BIN)/python: pyproject.toml
 	$(PYTHON) -m venv $(VENV)
@@ -81,6 +81,13 @@ PILOT_SITES ?= 027,055,145,012,021,128,071,117
 pilot:
 	$(MAKE) run ARGS="--only $(PILOT_SITES) --force-navigation --confirm-submit --max-steps 30 --max-seconds 300 --spend-cap 5 $(PILOT_ARGS)"
 
+# Judge every site of a (capture-only) run from its saved evidence: no visits, no agent. Needs
+# the gateway (a few cents per site). Rebuilds the image first, like rescore.
+classify: build
+	@test -n "$(RUN)" || (echo "usage: make classify RUN=<run id>"; exit 1)
+	$(COMPOSE) up -d --wait llm-gateway
+	$(COMPOSE) run --rm --no-deps crawler scamhunter classify --run-id $(notdir $(RUN))
+
 # Re-classify from saved evidence; no site visits, so no selftest gate. Needs the gateway.
 RUN ?=
 # Depends on build: the rescore runs in the crawler image, so code changes must be in it
@@ -90,8 +97,10 @@ rescore: build
 	$(COMPOSE) up -d --wait llm-gateway
 	$(COMPOSE) run --rm --no-deps crawler scamhunter rescore --run-id $(notdir $(RUN))
 
-eval:
-	@echo "make eval: not implemented (M4)"; exit 1
+# Precision/recall at 0.45 and 0.5 against eval/labels.csv (no containers, no network).
+eval: venv
+	@test -n "$(RUN)" || (echo "usage: make eval RUN=<run id>"; exit 1)
+	$(BIN)/python eval/evaluate.py runs/$(notdir $(RUN))/output/results.json $(ARGS)
 
 # Read-only: builds runs/<id>/review/index.html from saved evidence. No containers, no network.
 review: venv

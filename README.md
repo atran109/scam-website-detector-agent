@@ -8,11 +8,11 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - One record per input URL, with `is_scam`, `classification`, `scam_probability`, `confidence`, site `status`, `processing_status`, `evidence_source`, primary and low-confidence addresses (DESIGN §3.4).
 - Verdicts: TODO(M6) scam / TODO(M6) not_scam; live TODO(M6), dead TODO(M6) (triage-1: 56 live, 104 not live).
 - Addresses: TODO(M6) primary addresses on TODO(M6) sites; TODO(M6) found only behind registration.
-- Accuracy on hand labels: precision TODO(M6) / recall TODO(M6) at threshold 0.45, and at 0.5 TODO(M6).
+- Accuracy on hand labels: **interim, 8 labels only** (the plan wants 25+; `eval/labels.csv`, `make eval RUN=<id>`): on the capture-only run `capture-2`, judged from saved evidence, precision 100% and recall 80% (4 of 5 likely scams found, 3 of 3 probably-legitimate shops cleared) at both 0.45 and 0.5; the miss is 003, a consultancy page on a whisky domain at p=0.22. TODO(M6): the same on 25+ labels.
 - Navigation on real sites: reached a deposit page on TODO(M6) of TODO(M6) attempted; `blocked_at` tally TODO(M6).
 - Live-site structure (13 of 56 live sites with saved HTML; pilot-5): TODO(M6) full tally; so far 2 address on landing, 6 registration-gated, 1 wallet-gated, 4 unclear.
 - Mock exchange (M3 step E, Sonnet 5.5): 18/18 solvable runs found all six addresses (first by step 9, all by step 21); gated variants 12/12 after the CAPTCHA and history fixes (10/12 before); zero policy refusals; about $2.4 per 30-run batch.
-- Cost: TODO(M6) total, TODO(M6) per site (judge ≈ $0.012/call; navigator ≈ $0.07–0.15 per mock run).
+- Cost: TODO(M6) total, TODO(M6) per site. Measured so far from the gateway usage log (`runs/<id>/usage.json`): judging 42 saved pages $0.47 (about $0.011 each); a live navigation of 3 real sites $0.35 (012 $0.22, 071 $0.08, 145 $0.05); a mock run $0.03–0.12.
 - Confidence: `scam_probability` ≥ 0.45 ⇒ scam (leans toward recall); `confidence` = P(stated verdict correct), so 0.45–0.5 is "scam" with confidence < 0.5, which marks the shaky verdicts.
 - Run it: `make selftest` → `make run` → `make report`; `make review RUN=<id>` for a read-only HTML review page.
 
@@ -20,7 +20,7 @@ Skeleton: one-line bullets drawn from `docs/LOG.md` and `docs/DESIGN.md`. Prose 
 - Pipeline: triage (plain HTTP via egress proxy) → capture (Chromium) → navigate (agent, scam-or-uncertain sites) → extract → classify → JSON (DESIGN §5.1).
 - Capture and classification are separate stages: `make rescore` re-classifies from saved evidence without revisiting sites.
 - Extraction: own validators (base58check, bech32/bech32m, EIP-55, TRON, SOL by label), JSON-key-aware, contract labels dropped, QR decoded from screenshots.
-- Classification: Claude judge (screenshot + sanitized text + signals) fused with weighted heuristic signals; hard-rule floors; dead sites → Wayback → signals → not_scam (DESIGN §5.2a).
+- Classification: Claude judge (screenshot + sanitized text + signals) fused with weighted heuristic signals; hard-rule floors; dead sites → Wayback → signals → not_scam (DESIGN §5.2a). The rubric (every signal with tier, weight and trigger, and the fusion formula `p = 0.7·p_llm + 0.3·sigmoid(Σweights − 2)`) is the table in DESIGN §5.4; a test keeps it in step with the code. After navigation the judge sees the landing page and the agent's best page, and signals come from every snapshot.
 - Navigation agent: own observe → decide → policy → act → extract loop; Claude picks whitelisted tools; every action checked in code by `policy.py` (DESIGN §5.5).
 - Element finding: accessibility roles plus non-semantic clickables (`cursor: pointer`, click handlers) behind an `ElementProvider` interface.
 - LLM gateway container holds the API key; the crawler never sees it; whitelisted request shape, response cache, per-site usage log.

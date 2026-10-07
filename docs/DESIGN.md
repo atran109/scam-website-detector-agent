@@ -992,6 +992,41 @@ snapshot ─► patterns.py   finds candidates in: visible text, attributes, scr
    - Calibrate the thresholds against `eval/labels.csv`, and document the final formula in the README.
    - **Verdict bias:** the fused score maps to `scam` at `scam_threshold` = 0.45, slightly below an even split. Uncertain cases lean scam, with confidence kept low so reviewers can see which verdicts are shaky. Tune the threshold on the hand labels and report the resulting precision and recall.
 
+**The scoring rubric as implemented (M4, 2026-10-07).** Every signal the code can emit, its tier, its weight and what sets it off. `tests/test_rubric_doc.py` fails if the code emits a signal name this table does not list.
+
+<!-- rubric:start -->
+| signal | tier | weight | fires when |
+|---|---|---|---|
+| `guaranteed_returns` | strong | 3.0 | a fixed percentage per hour/day/week/month, plan tiers with duration, "guaranteed profit", "risk-free", 日收益/保本/稳赚 |
+| `giveaway_send_to_receive` | strong | 3.0 | "send X, receive 2X back", "double your BTC" |
+| `seed_phrase_input` | strong | 3.0 | a seed-phrase or private-key input on a domain that is not a wallet provider (hard rule: probability at least 0.92) |
+| `cloudflare_phishing_interstitial` | strong | 3.0 | the probe or click-through met a browser/CDN "suspected phishing" warning page (hard rule: at least 0.85) |
+| `invite_code_required` | moderate | 1.5 | "invitation code" (and 邀请码, mã giới thiệu, รหัสเชิญ) in the visible text |
+| `contract_or_quant_trading` | moderate | 1.5 | seconds-contract, contract trading and quant-trading wording |
+| `withdrawal_conditions` | moderate | 1.5 | withdrawal fees, "deposit to activate", "activation wallet/fee/deposit", unlock-your-funds |
+| `profit_plus_capital` | moderate | 1.5 | "total profit + capital", "capital + interest" |
+| `license_claims` | moderate | 1.5 | licence or regulator claims in the text |
+| `urgency` | moderate | 1.5 | countdowns and pressure wording |
+| `customer_service_deposit` | moderate | 1.5 | deposits only via a customer-service chat |
+| `crypto_only_payments` | moderate | 1.5 | a shop or stock-trading product page that accepts only three or more coins |
+| `mobile_exchange_template` | moderate | 1.5 | at least 4 of: Recharge, Withdraw, Finance, Loan, Service, AI Quant, Chat Room, Connect Wallet |
+| `deposit_address_after_registration` | moderate | 1.5 | the navigation agent was shown a primary address on a deposit or logged-in page |
+| `brand_in_domain:<brand>` | moderate | 1.5 | a `brands.yaml` name inside a domain that is not the brand's own |
+| `brand_typosquat:<brand>` | moderate | 1.5 | a name one or two typos from a brand, first letter agreeing |
+| `sibling_of_scam:<domain>` | moderate | 1.5 | a no-content site whose sibling domain (same name, other suffix) was judged a scam on content (cross-site pass) |
+| `free_hosting` | moderate | 1.0 | a free-hosting suffix (netlify.app, workers.dev, myshopify.com …) |
+| `hosting_suspended` | moderate | 1.0 | the probe saw a hosting takedown page |
+| `cheap_tld:.<tld>` | weak | 0.5 | a cheap TLD (.xyz, .top, .cc, .store, .shop, .sbs …) |
+| `finance_terms_in_domain` | weak | 0.5 | a finance word in the host (ignored for sites with no content) |
+| `random_looking_domain` | weak | 0.5 | digits mixed into the name, no vowels, or letter pairs no English word uses (names made of open syllables, such as pinyin, are exempt from the letter-pair test) |
+| `mobile_app_host` | weak | 0.5 | a host starting `h5.`, `m.`, `wap.` or `web3.` |
+| `invalid_tls_cert` | weak | 0.5 | the certificate failed verification at the probe |
+| `domain_content_mismatch` | weak | 0.5 | the site's name appears nowhere in the page title or text (pages of 40+ words) |
+| `shows_crypto_address` | weak | 0.0 | a validated address is on the page (recorded, no weight: legitimate merchants show addresses too) |
+<!-- rubric:end -->
+
+**Fusion (`classify/scorer.py`).** Heuristic probability `p_h = sigmoid(sum of weights − 2)`. With a judgment: `p = 0.7 · p_llm + 0.3 · p_h`; without: `p = p_h`. Hard rules raise `p` to their floor. A partial visit keeps `p` in [0.2, 0.8]. A Wayback snapshot shrinks it toward 0.5 (`0.5 + 0.8 · (p − 0.5)`). The verdict is `scam` when `p ≥ scam_threshold` (0.45); `confidence = p` for scam and `1 − p` for not_scam. A disagreement of more than 0.5 between the judge and the heuristics adds a note. Sites with no content use the dead-site policy (§5.2a): the same signals without the finance-term one, banded 0.5–0.65 when they lean scam, 0.4 when nothing is known.
+
 **After navigation (2026-10-07, pilot sites 012 and 021).** `analyze` runs the non-content check on the capture snapshots only (`s01`…; a maintenance or error page the agent reached is a gate, `blocked_at: maintenance`, never the site's status); computes `content_signals` over every snapshot, landing and agent, one signal per name at its heaviest; adds `deposit_address_after_registration` (moderate, weight 1.5) when a primary address was shown on a deposit or logged-in page; and gives the judge the landing page (text and screenshot) **and** the agent's best page (the last deposit page with a primary address, else the last deposit page, else the last logged-in page, else the last non-landing page), with a line saying what the agent did. Before, it judged only the last snapshot: 012 fell from 0.96 to 0.44 on a 34-word payment page, and 021 was re-labelled `empty` from its `/register` maintenance page.
 
 ### 5.5 Navigation agent (`agent/`)
