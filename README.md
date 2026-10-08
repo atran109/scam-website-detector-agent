@@ -29,6 +29,15 @@ evidence and 5 used Wayback snapshots.
 The 25-site hand-label set has TP=21, FP=0, FN=1, TN=3 at both 0.45 and 0.50 thresholds. This is
 a small, deliberately reviewable sample—not a population accuracy claim. The labels are skewed
 toward suspected scams (22/25), and the three-address recall check covers one known deposit site.
+By author (`labeled_by` in `eval/labels.csv`): my 8 labels give TP=4, FP=0, FN=1, TN=3 (100%
+precision, 80% recall) and contain all three negatives and the one miss; the 17 written by the AI
+assistant from saved screenshots are all scams and all match the pipeline (17/17). Those 17 are
+not independent of the system they evaluate, so the 8-label figures are the honest ones.
+
+**Provenance.** One published record merges two saved runs. Site 012 (`bradfordtradeins.com`)
+keeps the final run's classification, but its addresses and `navigation` summary come from pilot
+run `pilot-20261007b`. The final run hit its 180 s navigation limit after BTC and EVM; the pilot,
+at 300 s, also reached the TRON address. The record's `notes` say so. No other record is merged.
 
 The accepted full run and crash recovery cost approximately $4.12. A final cached rescore cost
 $0.00; preserved per-site accounting totals 2,724,575 input and 87,888 output tokens. The local
@@ -104,22 +113,41 @@ form, source, discovery stage, labels, and screenshot.
 
 ## Setup and commands
 
-Requirements: Docker Desktop, GNU Make, and Python 3.12. Docker Desktop must be running; restrict
-its file sharing to this project directory if possible.
+Requirements: GNU Make and Python 3.12; Docker Desktop (running) for anything that uses a
+browser or container. Restrict Docker's file sharing to this project directory if possible.
+
+### No API key, no internet: check the submission
 
 ```bash
 git clone <private-repository-url>
 cd scam-website-detector-agent
-cp .env.example .env
-# Put ANTHROPIC_API_KEY in .env; never commit it.
-make check
-make selftest RUN_ID=safety-check
+make check                                   # pinned venv, lint, 650 unit tests
+.venv/bin/python eval/evaluate.py output/results.json   # accuracy table from the published file
+cp .env.example .env && make test-browser    # optional: 47 Chromium tests, offline container
 ```
 
-`make check` installs the pinned Python development environment and runs lint plus unit tests. The
-47 Chromium tests run separately with `make test-browser`.
+Then read `output/results.json` (one record per URL) and the evidence screenshots in
+`output/screenshots/` (each `address_details[].screenshot` points to one). `make test-browser`
+needs Docker and an `.env` file, which may be the empty copy; the container has no network.
 
-Run a new collection only if live-site interaction is intended:
+### What each command needs
+
+| Command | Docker | API key in `.env` | Internet (visits targets) | Saved `runs/<id>/` |
+|---|---|---|---|---|
+| `make check`, `make test`, `eval/evaluate.py output/results.json` | – | – | – | – |
+| `make test-browser` | yes | – | – | – |
+| `make selftest` | yes | yes | only `example.com` | – |
+| `make triage`, `make capture`, `make run`, `make pilot` | yes | yes | **yes** | – |
+| `make rescore`, `make classify` | yes | yes | – | yes |
+| `make review`, `make eval RUN=…`, `make report RUN=…` | – | – | – | yes |
+
+`runs/` is gitignored (traces, raw HTML, LLM cache), so the last two rows work only where the
+runs were made, not from a fresh clone. The gateway refuses to start without a key.
+
+### Running a collection
+
+Put `ANTHROPIC_API_KEY` in `.env` (never commit it). Run a new collection only if live-site
+interaction is intended:
 
 ```bash
 make triage RUN_ID=my-run
@@ -132,7 +160,8 @@ make report RUN=my-run
 ID with `--resume` after interruption. Do not reuse a run ID without `--resume`. To require human
 approval before form submissions, add `--confirm-submit` (which forces concurrency 1).
 
-Useful saved-evidence operations do not visit targets:
+Saved-evidence operations do not visit targets, but they need the original `runs/` directory
+(not in git), so they only work on the machine that made the runs:
 
 ```bash
 make review RUN=m6-final-20261007
@@ -143,7 +172,10 @@ make report RUN=m6-final-20261007 ARGS="--supplement-run pilot-20261007b"
 The last command documents one final-run limitation: the final pass captured two of
 `bradfordtradeins.com`'s three deposit options, while the saved pilot captured BTC, EVM, and TRON.
 Publishing selects the richer saved address evidence but preserves the final run's classification;
-it does not hand-edit JSON or revisit the site.
+it does not hand-edit JSON or revisit the site. The one later edit to the published file is a
+privacy redaction: site 084's recorded off-site URLs carried the visitor IP the site saw, now
+`ip=<redacted>`. Rerunning `make report` would restore it from `runs/`, so reapply the redaction
+after any republish.
 
 ## Output example
 
