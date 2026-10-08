@@ -1,70 +1,169 @@
-# Project BloodHound
+# Crypto Scam Detection Agent
 
-A hardened browser agent that classifies 160 supplied websites as scam/not-scam and extracts
-validated cryptocurrency addresses, including addresses revealed only after registration,
-login, email verification, or deposit-page navigation. The submission is
-[`output/results.json`](output/results.json); evidence screenshots are in
-[`output/screenshots/`](output/screenshots/).
+## Summary
 
-## Results
+I built a sandboxed browser agent that takes 160 suspected scam URLs, decides for each one
+whether it is a scam, and pulls out the crypto deposit addresses it shows, including addresses
+that appear only after registering, logging in, verifying an email and opening a deposit page.
+Plain, tested code does the checking, saving, address extraction and output; a Claude model does
+only two jobs that need judgment: reading a page to call it a scam, and choosing the next click.
+The deliverable is [`output/results.json`](output/results.json), one record per URL in input
+order; evidence screenshots are in [`output/screenshots/`](output/screenshots/). The final run
+(`m6-final-20261007`) completed all 160 records.
 
-The final run (`m6-final-20261007`) completed all 160 records with no partial or failed record.
+| Result | Value |
+|---|---|
+| **My 8 hand labels** (n=8) | TP 4, FP 0, FN 1, TN 3: precision 100%, recall 80% |
+| All 25 hand labels | TP 21, FP 0, FN 1, TN 3: precision 100%, recall 95%. 17 of the 25 were written by the AI assistant, are all scams, and all match the pipeline, so they are not independent |
+| Scam / not scam | 77 / 83 (on live page content: 34 / 11) |
+| Live sites at the final check | 43 of 160 (45 records were judged on live page content; see below) |
+| Deposit addresses found | 22 (20 unique) on 8 sites, all checksum-valid |
+| Low-confidence addresses | 320 on 2 sites (valid, but with no deposit context) |
+| Navigation run / deposit page reached | 39 / 7 sites |
+| Cost | about $4.12 for the final run and its crash recovery, $0.90 for a targeted rerun |
 
-| Result | Count |
-|---|---:|
-| Scam / not scam | 77 / 83 (live content 34 / 11) |
-| Live / non-live at final triage | 43 / 117 |
-| Primary address findings | 22 (20 unique) on 8 sites |
-| Low-confidence findings | 320 (319 unique) on 2 sites |
-| Navigation attempted / deposit page reached | 39 / 7 |
-| Hand-label accuracy | 96% (24/25) |
-| Hand-label precision / recall / F1 | 100% / 95% / 98% |
-| Address-label precision / recall | 100% / 100% (3/3) |
+43 sites were live at the final check, but 45 records were judged on live page content: for 009
+and 035 the page that loaded was a Cloudflare "suspected phishing" warning in front of the site,
+so the warning itself was judged (both are scams by a fixed rule for such warnings).
 
-The status breakdown is 53 DNS failures, 43 live, 19 HTTP errors, 15 TLS errors, 10 timeouts,
-8 empty, 6 parked, and 6 suspended.
+## System design and architecture
 
-Verdicts by `evidence_source` (filter on it; the dead-site rows are leans, not findings):
+```text
+data/urls.txt
+     |
+     v
+HTTP check ---> archived copy (Wayback) if dead --------------+
+     |                                                        |
+     v                                                        v
+browser capture --> address extraction --> rule signals + Claude judge
+     |                    |                                   |
+     |                    +--> checksum / blocklist / labels  |
+     v                                                        |
+navigation decision --> look / choose / check / act loop -----+
+     |                                                        |
+     +--> register / log in / email / deposit, save each step |
+                                                              v
+                          checkpoint.jsonl --> rescore --> results.json
+```
+
+I built a pipeline in which ordinary code does every step that can be tested. An HTTP check sorts
+each URL into a status (live, DNS failure, parked and so on). Live pages are opened in a real
+browser and everything is saved: HTML, visible text, a screenshot, network responses and QR codes. Addresses are found with
+patterns and kept only if they pass their coin's checksum. Claude reads the page and gives a
+probability that it is a scam, which I blend 70/30 with a score from simple rules. A dead site
+gets an archived copy from the Wayback Machine if one exists, otherwise the dead-site rule below.
+<!-- evidence: docs/DESIGN.md §5.1; src/scamhunter/pipeline.py process_site(), analyze();
+src/scamhunter/extract/validators.py validate(); src/scamhunter/classify/scorer.py LLM_WEIGHT -->
+
+In the final run, the navigation agent ran on 39 of the 45 sites
+judged on live content: 35 because the first verdict was scam or uncertain (probability 0.35 to
+0.65), and 4 only because the landing page showed a login, a wallet button or an address. The
+other 6 (003, 051, 053, 081, 091, 102) were skipped: confident not-scam, nothing to log into. Claude picks from 11 fixed actions; code checks each before it runs. The run used the default limit of 180 seconds and 25 steps per site, which cut three
+deposit pages short (012, 032, 109); I reran those at 300 seconds. I chose this trigger on the
+same sites, so it was never tested on fresh data.
+<!-- evidence: src/scamhunter/agent/site_run.py should_navigate(); LOG 2026-10-07 19:10;
+config/settings.yaml agent; LOG 2026-10-08 00:13 (batch command), 00:30 (gap report);
+runs/m6-final-20261007/checkpoint.jsonl notes "first judgment" / "navigation skipped" -->
+
+The browser runs in a locked-down Docker container that can only go out through a proxy that
+refuses private addresses such as my home router. The API key lives in a separate container. A 50-check
+self-test must pass before any command that visits a real site.
+<!-- evidence: docker-compose.yml; docker/egress-proxy/squid.conf; Makefile (run: selftest);
+runs/m6-final-20261007/selftest.json (50/50) -->
+
+Full details and the threat model are in [`docs/DESIGN.md`](docs/DESIGN.md).
+
+## Anything unique or creative
+
+**A fake scam exchange to test against.** Before visiting real sites I built a local fake scam
+exchange with 13 variants: 8 that can be solved and 5 that end at a gate (invite code, SMS,
+CAPTCHA, wallet, image CAPTCHA). Every variant has traps ("I have paid", Withdraw, Connect Wallet,
+fake token addresses), and one hides instructions aimed at the AI. After my fixes the real model
+passed 30 of 30 runs, and the final check through the full pipeline passed 13 of 13.
+<!-- evidence: tests/fixtures/mock_exchange/; src/scamhunter/mock_mode.py SOLVABLE_VARIANTS,
+GATED_VARIANTS; LOG 2026-10-06 20:55 (30/30); LOG 2026-10-07 19:00 (pmock-3 13/13) -->
+
+**Safety rules in code, and a pilot that broke them.** The rules (stay on the site, type only
+synthetic data, never pay, sign or withdraw) are checked in code, not just asked for in the prompt.
+My watched 8-site pilot still found 2 violations: the model read an image CAPTCHA and typed its
+text (site 145), and a page sent the browser to 2 other sites before the agent could undo it
+(071). I fixed both in code and added each as a new fake-exchange variant. In the rerun neither
+happened again.
+<!-- evidence: src/scamhunter/agent/policy.py; LOG 2026-10-07 07:00, 07:30 (violations), 08:10
+(typing rule), 09:40 and 15:10 (navigation guards), 13:40 (rerun) -->
+
+**Re-judging from saved evidence.** Because every page is saved, I picked the dead-site rule
+from the final run's own data and applied it to all 160 records for $0, with no site visits.
+<!-- evidence: eval/dead_site_rule_report.py; LOG 2026-10-08 00:04, 00:27 -->
+
+**Evidence beyond addresses.** The output records where sites send visitors: LINE support chats
+on 4 sites, a redirect domain (071), an app on a second domain (027). It also records app-install
+files (`.apk`, `.mobileconfig`) on 117 and 088. A second registration on 057 and 087, 13 hours
+later, got the same addresses, so on those sites they are not per-account.
+<!-- evidence: output/results.json navigation.linked_domains, app_download_urls; LOG 2026-10-07
+16:30 (app downloads); LOG 2026-10-08 (rerun result, per-account finding) -->
+
+## Alternative approaches considered
+
+| Choice | Chosen | Rejected | Why | What would change my mind |
+|---|---|---|---|---|
+| Agent | My own small loop | Stagehand, browser-use, LangGraph, Playwright MCP | I needed network capture, request blocking and a code check before every action. Stagehand documents neither; browser-use runs its own loop; LangGraph is overkill for about 5 states. I did not evaluate Playwright MCP: it gives a model broad browser tools in a client that can also run shell commands | Element-finding as the main failure (pilot failures were gates and absent flows) |
+| Where it runs | Docker on my Mac | Cloud server, Browserbase | Cloud would cost 3 to 5.5 of my 15 to 25 hours; Browserbase routes scam traffic through a third party. Cost: sites see my home IP | A work laptop, or cloud IPs seeing different pages |
+| API key | Separate gateway | Key in the browser container | A compromised browser cannot read the key or use the API to reach the internet | Nothing |
+| Addresses | Patterns plus checksums | Patterns only, or the model | Checksums drop random lookalikes and are testable. Model extraction not tested | Addresses shown only in images |
+| Verdict | Rules blended with the model | Model alone | The model's probability is not calibrated alone; rules flagged 16 disagreements. Never compared directly | A labelled test where the model alone does better |
+| Withdraw, "I have paid" | Always blocked in code | Allowed | No money is at stake, but they send a false payment claim or an order to the scammer and give page text more chances to steer the agent | Never |
+| Fake wallet | Cut | Built | 1 of 56 live sites needed a wallet on its landing page | Many wallet gates (3 in the final run) |
+| When to navigate | Rule-based trigger | Navigate every live site | The pilot forced it to test the agent; the batch saved cost with the trigger | Skipped sites turning out to hide deposit flows |
+
+<!-- evidence: LOG 2026-10-03/10-04 (own loop, Stagehand research, LangGraph, Browserbase, run
+location, DESIGN §6.1 hours); LOG 2026-10-04 20:30, 21:30 (gateway); DESIGN §6 (regex-only);
+DESIGN A22 and output notes "disagree" (16); LOG 2026-10-06 20:00 backfill (withdraw/"I have
+paid"); LOG 2026-10-06 22:50 (wallet cut); output stop reasons (3 wallet_required); LOG
+2026-10-07 03:10 (forced pilot), 19:10 (trigger), 14:30 (pilot failures not element-finding).
+Playwright MCP and the "steer the agent" reason are the author's own reasoning, recorded in LOG
+2026-10-08 -->
+
+## Results in detail
+
+**Verdicts by evidence.** `evidence_source` says what each verdict rests on. Rows other than
+`live` are leans, not findings.
 
 | `evidence_source` | Scam | Not scam |
 |---|---:|---:|
 | `live` (page content, judged) | 34 | 11 |
-| `wayback` (archived page, judged, shrunk toward 0.5) | 3 | 2 |
-| `signals_only` (no content, domain or probe signals) | 40 | 28 |
-| `none` (no content, no signal) | 0 | 42 |
+| `wayback` (archived page, judged, pulled toward 50/50 because archived evidence is weaker) | 3 | 2 |
+| `signals_only` (no content; domain or hosting signals only) | 40 | 28 |
+| `none` (no content and no signal) | 0 | 42 |
 
-**Dead-site rule.** Chosen from the final run's data with `eval/dead_site_rule_report.py`, with no
-site visits.
+The status breakdown is 53 DNS failures, 43 live, 19 HTTP errors, 15 TLS errors, 10 timeouts, 8
+empty, 6 parked and 6 suspended.
 
-- **The rule.** A site without content leans scam (p 0.5–0.65) only on a machine-generated-looking
-  name (`random_looking_domain`), a brand in a domain the brand does not own, a brand typosquat, a
-  hosting-takedown page, or a sibling domain judged a scam. A provider phishing warning stays a
-  hard rule. Anything else (cheap TLD, invalid certificate, free hosting, mobile host, finance
-  words) is listed but gives not-scam at p 0.4.
-- **The data.** On the 45 live-content sites (34 scam, 11 not), `random_looking_domain` fired on 7
-  scams and 0 others. Cheap TLDs separated weakly (18 vs 3). Finance words did not separate at all
-  (12 vs 4, the same rate on both). The brand, typosquat and takedown signals were too rare on live
-  sites to measure (at most 4 each), so they are kept on their merits. Caveat: the judge saw these
-  signals and the URL, so live verdicts are not independent of them.
-- **The rules not chosen,** on the same 110 no-content records:
-  - the previous rule (any moderate signal or three weak ones): 22 scam / 88 not;
-  - treating every unknown site at the live base rate (75.6%, shrunk to p 0.70): 110 / 0;
-  - only the one measured signal: 23 / 87, which drops every brand-impersonation lean.
+**Dead-site rule.** I chose it from the final run's data with `eval/dead_site_rule_report.py`,
+without visiting any site.
 
-  The chosen rule gives 40 / 70. It flipped 18 sites to scam, all on a random-looking name.
+- **The rule.** A site with no content leans scam (probability 0.5 to 0.65) only if its name looks
+  machine-generated, it uses a brand name it does not own, it is a near-misspelling of a brand, its
+  host shows a takedown page, or a sibling domain was judged a scam. A provider's phishing warning
+  is a fixed rule. Anything else (cheap domain ending, invalid certificate, free hosting, mobile
+  subdomain, finance words) is listed but gives not-scam at probability 0.4.
+- **The data.** On the 45 sites judged on live content (34 scam, 11 not), a machine-generated name
+  appeared on 7 scams and 0 others. Cheap domain endings separated weakly (18 vs 3). Finance words
+  did not separate at all (12 vs 4, the same rate in both groups). The brand, misspelling and
+  takedown signals were too rare on live sites to measure (at most 4 each), so I kept them on their
+  merits. Caveat: the model saw these signals and the URL, so live verdicts are not independent of
+  them.
+- **The rules not chosen,** on the same 110 records with no content:
+  - the previous rule (any moderate signal, or three weak ones): 22 scam, 88 not;
+  - every unknown site at the live scam rate (75.6%, pulled to 0.70): 110 scam, 0 not;
+  - only the one measured signal: 23 scam, 87 not, which drops every brand impersonation.
 
-The 25-site hand-label set has TP=21, FP=0, FN=1, TN=3 at both 0.45 and 0.50 thresholds. This is
-a small, deliberately reviewable sample—not a population accuracy claim. The labels are skewed
-toward suspected scams (22/25), and the three-address recall check covers one known deposit site.
-By author (`labeled_by` in `eval/labels.csv`): my 8 labels give TP=4, FP=0, FN=1, TN=3 (100%
-precision, 80% recall) and contain all three negatives and the one miss; the 17 written by the AI
-assistant from saved screenshots are all scams and all match the pipeline (17/17). Those 17 are
-not independent of the system they evaluate, so the 8-label figures are the honest ones.
+  The chosen rule gives 40 scam, 70 not. It moved 18 sites to scam, all with machine-generated
+  names.
 
-**Provenance.** Three published records merge two saved runs. Each keeps the final run's
-classification, and its addresses and `navigation` summary come from a later run at 300 s,
-because the final run hit its 180 s navigation limit on the deposit page. Each record's `notes`
-name the source run.
+**Merged records.** Three published records combine two saved runs. Each keeps the final run's
+verdict, but its addresses and navigation summary come from a later run at 300 seconds, because
+the final run hit its 180-second limit on the deposit page. Each record's `notes` name the source.
 
 | Site | Source run | Final run found | Merged record |
 |---|---|---|---|
@@ -72,100 +171,126 @@ name the source run.
 | 032 `elite-crown.com` | `nav-rerun-20261008` | BTC, TRON | + EVM |
 | 109 `windrushs.co` | `nav-rerun-20261008` | BTC, EVM | + TRON, + a second EVM |
 
-A saved run is merged only if its addresses include every address already published (a new
-account could be given different, per-account addresses). The same rerun also covered 057, 061,
-067 and 087 and found nothing new, so those records are unchanged. The rerun cost $0.90 in total.
+A later run is used only if it found every address the first run did, plus more, because a new
+account could be given different addresses. The same rerun covered 057, 061, 067 and 087 and found
+nothing new, so those records are unchanged.
 
-The accepted full run and crash recovery cost approximately $4.12. Each cached rescore, including
-the one that applied the dead-site rule, cost $0.00; preserved per-site accounting totals 2,724,575 input and 87,888 output tokens. The local
-mock regression separately passed all 13 variants (10 solvable and 3 gated).
+**Hand labels.** I labelled 8 sites from saved screenshots: 5 scams, 3 not. On them the system
+scores TP 4, FP 0, FN 1, TN 3. The miss is 003, a whisky domain showing an immigration-services
+page. The AI assistant wrote 17 more labels from saved screenshots. All 17 are scams and all match
+the pipeline, so they do not test it independently, and all three negatives are mine. The
+threshold makes no difference: no record has a scam probability above 0.40 and below 0.50. Address
+labels exist for one site (012): 3 of 3 found.
 
-## What “scam” means
+## What counts as a scam; crypto-address model
 
-A scam intentionally deceives a visitor into surrendering money, crypto, credentials, a seed
-phrase, or wallet authority. The taxonomy includes fake exchanges, HYIPs/investment schemes,
-pig-butchering fronts, phishing, wallet drainers, giveaways, fake recovery, fake shops, and fake
-tokens. Merely being offline, amateur, crypto-related, or risky is not enough.
+A scam intentionally deceives a visitor into handing over money, crypto, logins, a wallet's secret
+recovery phrase, or control of a wallet. The types include fake exchanges, high-yield investment
+schemes (fixed "daily returns"), pig butchering (a groomed victim steered to a fake trading app),
+phishing, wallet drainers, giveaways, fake recovery services, fake shops and fake tokens. Being
+offline, amateur, crypto-related or risky is not enough.
 
-Evidence is tiered:
+Evidence comes in three strengths. **Strong** is nearly decisive alone: a recovery-phrase request,
+a provider's phishing warning, guaranteed returns. **Moderate** counts in combination: an invite
+code requirement, a deposit address shown after registration. **Weak** is supporting only: a cheap
+domain ending, an invalid certificate, a random-looking name.
 
-- **Strong:** nearly decisive alone, such as a seed-phrase request or a provider phishing warning.
-- **Moderate:** meaningful but contextual, such as guaranteed returns or a deposit address exposed
-  after registration.
-- **Weak:** supporting evidence only, such as a cheap TLD, invalid certificate, or random-looking
-  domain.
+An address has three separate properties. Its **format** is how the string is written, and it is
+certain once the checksum passes: Bitcoin (`bc1…`, `1…`, `3…`), EVM (`0x…`, used by Ethereum and
+compatible chains) or TRON (`T…`). Its **network** is the chain the site says to send on. Its
+**asset** is the coin or token, such as USDT. Network and asset come from the page and carry a
+confidence, because one EVM address can receive ETH, USDT and USDC at once.
 
-For live content, a Claude judgment is fused with deterministic signals. For a site without usable
-content, the pipeline tries a saved Wayback page, then calls it scam only if the domain looks
-machine-generated, names a brand it does not belong to, or the host shows a takedown page (the
-dead-site rule, below). Otherwise it emits not-scam at low confidence. `evidence_source` makes that distinction explicit.
+`crypto_addresses` lists checksum-valid addresses shown in a deposit or payment context, exactly as
+written on the site. `low_confidence_addresses` lists valid addresses without that context, such as
+ones found only in a script. Token contracts, burn addresses and examples are excluded.
 
-## Architecture
+## Limitations
 
-```text
-data/urls.txt
-     |
-     v
-HTTP triage ---> Wayback fallback --------------------------+
-     |                                                       |
-     v                                                       v
-Chromium capture --> deterministic extraction --> signals + Claude judge
-     |                    |                                  |
-     |                    +--> checksum/blocklist/labels     |
-     v                                                       |
-navigation trigger --> observe/decide/policy/act loop -------+
-     |                                                       |
-     +--> register/login/email/deposit --> capture each step  |
-                                                             v
-                         checkpoint.jsonl --> rescore --> results.json
-```
+- **Navigation in the final run was limited.** It ran at 180 seconds and 25 steps per site, without
+  forcing navigation; three deposit pages were cut short and later rerun, and 6 live sites were
+  skipped by the trigger. The trigger was chosen on the same sites it ran on.
+- **The labels are few and mostly mine to trust.** My 8 labels include only 3 negatives; the
+  assistant's 17 are all scams that match the pipeline.
+- **Two pilot safety violations** happened before the fixes (an image CAPTCHA typed, two off-site
+  page loads). They were fixed in code and tested on the fake exchange.
+- **Sites see my home IP address.** A disposable cloud server or a regional proxy would hide it.
+- **Blocked off-site pages can still get a connection.** When the browser blocks an off-site page,
+  Chromium may already have opened a connection to it ("preconnect"), so that host sees a handshake
+  but no request. Redirects sent by a server can also start a connection before the agent undoes
+  them.
+- **Dead sites may be blocking my country,** not actually down.
+- **Gates are never bypassed:** SMS, ID checks, CAPTCHA challenges, payments, real wallets and app
+  installs end the visit. Email verification uses disposable mail.tm inboxes.
+- **Addresses can rotate or differ per account.** Only 057 and 087 were registered twice.
+- **Screenshots do not always show the address.** 12 of the 22 addresses are visible in their
+  screenshot (11 boxed in red on 012, 027, 032 and 109, plus 087's XRP in an open dialog). The other
+  10 (057, 099, 100, and 087's EVM, BTC and TRON) were read from page data that is not drawn on
+  screen.
+- **Hidden frames are missed.** The agent lists controls in the main page only; unusual frames can
+  be missed.
+- **The brand list was built while reviewing these URLs,** so the brand signal may not generalize.
+- **Low-confidence addresses are noisy:** 280 of the 320 come from one marketplace's data feed.
 
-The browser runs as a non-root user in a disposable, read-only Docker container. Its internal-only
-network can leave only through a Squid proxy that rejects private, loopback, link-local, reserved,
-and non-web destinations. A separate gateway is the only container with the Anthropic key. Every
-real-site command depends on a 50-check isolation self-test.
+No raw cookies, browser storage or secrets are published. All 342 published address details pass
+their checksum and blocklist checks, and each has a screenshot file. The final review of outbound
+traffic found no allowed request to a private address or a non-web port. Details are in
+[`docs/LOG.md`](docs/LOG.md).
 
-The navigator is a small Playwright state machine, not an unconstrained computer-use agent. Claude
-selects whitelisted actions; code enforces same-domain navigation, synthetic placeholders, bounded
-amounts, CAPTCHA/gate stopping, and prohibitions on paying, signing, withdrawing, uploading IDs or
-receipts, and claiming payment. Page text is nonce-delimited untrusted data. Full details and the
-threat model are in [`docs/DESIGN.md`](docs/DESIGN.md).
+## What I would do with more time
 
-Capture and classification are separate. HTML, visible text, accessibility state, screenshots,
-text network responses, QR decodes, and action traces are saved once; `make rescore` can tune the
-classifier without revisiting hostile or changing sites.
+**Find out what the addresses did, first.** I found 20 unique deposit addresses. Looking them up on
+their blockchains (incoming payments, balances, where money went next) would show which ones
+received victims' funds and link sites that pay into the same wallets. This is the most useful next
+step for an investigator, and none of it needs another visit to a scam site.
+<!-- evidence: output/results.json (20 unique primary addresses); DESIGN §1.4 (on-chain tracing
+out of scope, future work) -->
 
-## Crypto-address model
+**Group sites by operator.** Nine shop sites share one Chinese-language template (125, 128 to 130,
+141, 142, 150 to 152). 099 and 100 show the same two addresses, and four sites send visitors to
+LINE support chats. Grouping by shared address, page template and linked domain would turn 160
+separate verdicts into a handful of operations.
+<!-- evidence: LOG 2026-10-06 22:35, 22:50 (template); output/results.json 099/100
+crypto_addresses, navigation.linked_domains (128, 129, 130, 142) -->
 
-An address **format** says how a string is encoded (for example BTC bech32, EVM `0x…`, or TRON
-base58). A **network** says where it is usable (Ethereum, BSC, Polygon, Tron). An **asset** says what
-may be transferred (ETH, USDT, USDC). One EVM address can legitimately carry several
-asset/network labels, so labels are a list and each has a confidence and evidence string.
+**Measure address rotation at scale.** Registering twice worked on 2 sites (057 and 087: same
+addresses both times). Doing it on every site with a deposit page would tell whether a found
+address belongs to the site or only to my account.
+<!-- evidence: LOG 2026-10-08 (rerun result, per-account finding) -->
 
-`crypto_addresses` contains checksum-valid addresses seen in a deposit/payment context.
-`low_confidence_addresses` contains valid-looking addresses without that context, such as values
-found only in a script or marketplace API. Token contracts, burn/example values, and configured
-blocklist entries are excluded. Each address is returned exactly as displayed plus a normalized
-form, source, discovery stage, labels, and screenshot.
+**Reach the wallets I currently stop at.** Three sites stopped at a wallet requirement, and the
+agent never opens withdraw pages, where these kits ask for withdrawal fees. Both need a careful
+design (a fake wallet that refuses to sign, withdraw steps that never submit) before the safety
+rules could allow them.
+<!-- evidence: output/results.json navigation.blocked_at (3 wallet_required: 031, 055, 082);
+src/scamhunter/agent/policy.py ALWAYS_BLOCKED_CLICK (withdraw); classify/signals.py
+withdrawal_conditions (withdrawal fees, "activation wallet") -->
+
+**Also:** a larger labelled set with real legitimate sites (mine has 3), visits from several
+countries, closing the preconnect gap, and navigation that handles more languages than Chinese and
+English.
+<!-- evidence: eval/labels.csv labeled_by; LOG 2026-10-07 13:40, 14:30 (preconnect);
+src/scamhunter/agent/prompts.py (Chinese deposit labels) -->
 
 ## Setup and commands
 
-Requirements: GNU Make and Python 3.12; Docker Desktop (running) for anything that uses a
-browser or container. Restrict Docker's file sharing to this project directory if possible.
+Requirements: GNU Make and Python 3.12; Docker Desktop (running) for anything that uses a browser
+or container. Restrict Docker's file sharing to this project directory if possible.
 
 ### No API key, no internet: check the submission
 
 ```bash
 git clone <private-repository-url>
 cd scam-website-detector-agent
-make check                                   # pinned venv, lint, 654 unit tests
+make check                                   # pinned venv, lint, 656 unit tests
 .venv/bin/python eval/evaluate.py output/results.json   # accuracy table from the published file
+.venv/bin/python eval/evaluate.py output/results.json --labeled-by alex   # my 8 labels only
 cp .env.example .env && make test-browser    # optional: 47 Chromium tests, offline container
 ```
 
-Then read `output/results.json` (one record per URL) and the evidence screenshots in
-`output/screenshots/` (each `address_details[].screenshot` points to one). `make test-browser`
-needs Docker and an `.env` file, which may be the empty copy; the container has no network.
+Then read `output/results.json` and the screenshots in `output/screenshots/` (each
+`address_details[].screenshot` points to one). `make test-browser` needs Docker and an `.env` file,
+which may be the empty copy; its container has no network.
 
 ### What each command needs
 
@@ -178,13 +303,13 @@ needs Docker and an `.env` file, which may be the empty copy; the container has 
 | `make rescore`, `make classify` | yes | yes | – | yes |
 | `make review`, `make eval RUN=…`, `make report RUN=…` | – | – | – | yes |
 
-`runs/` is gitignored (traces, raw HTML, LLM cache), so the last two rows work only where the
-runs were made, not from a fresh clone. The gateway refuses to start without a key.
+`runs/` is not in git (it holds traces, raw HTML and the model-response cache), so the last two
+rows work only on the machine that made the runs. The gateway refuses to start without a key.
 
 ### Running a collection
 
-Put `ANTHROPIC_API_KEY` in `.env` (never commit it). Run a new collection only if live-site
-interaction is intended:
+Put `ANTHROPIC_API_KEY` in `.env` (never commit it). Run a new collection only if visiting live
+scam sites is intended:
 
 ```bash
 make triage RUN_ID=my-run
@@ -193,28 +318,21 @@ make eval RUN=my-run
 make report RUN=my-run
 ```
 
-`make run` invokes `make selftest` first and checkpoints each completed site. Reuse the exact run
-ID with `--resume` after interruption. Do not reuse a run ID without `--resume`. To require human
-approval before form submissions, add `--confirm-submit` (which forces concurrency 1).
+`make run` runs `make selftest` first and saves each finished site. After an interruption, rerun
+with the same run ID and `--resume`; never reuse a run ID without it. To approve each form
+submission yourself, add `--confirm-submit` (one site at a time). `--max-seconds 300 --max-steps
+30` matches the pilot's budget; the defaults are 180 and 25.
 
-Saved-evidence operations do not visit targets, but they need the original `runs/` directory
-(not in git), so they only work on the machine that made the runs:
+To republish the submitted file from saved evidence (only where `runs/` exists):
 
 ```bash
-make review RUN=m6-final-20261007
 make rescore RUN=m6-final-20261007
-make report RUN=m6-final-20261007 ARGS="--supplement-run pilot-20261007b"
+make report RUN=m6-final-20261007 ARGS="--supplement-run pilot-20261007b --supplement-run nav-rerun-20261008"
+.venv/bin/python scripts/validate_run.py
 ```
 
-The last command documents one final-run limitation: the final pass captured two of
-`bradfordtradeins.com`'s three deposit options, while the saved pilot captured BTC, EVM, and TRON.
-Publishing selects the richer saved address evidence but preserves the final run's classification;
-it does not hand-edit JSON or revisit the site. The one later edit to the published file is a
-privacy redaction: site 084's recorded off-site URLs carried the visitor IP the site saw, now
-`ip=<redacted>`. The report step now redacts any IP-valued `…ip=` query parameter itself, and
-`scripts/validate_run.py` fails if one is published. A saved run is merged into a record only if
-its addresses include every address already published (a superset); otherwise the record keeps
-its addresses and gets a "not merged" note.
+Publishing removes any visitor IP address a site wrote into a recorded link (site 084 did), and
+`scripts/validate_run.py` fails if one is published.
 
 ## Output example
 
@@ -244,82 +362,19 @@ Every input URL appears once and in input order. Fields omitted here are present
 }
 ```
 
-## Safety, assumptions, and limitations
-
-- The home public IP remains visible to target operators. A disposable cloud host or regional
-  proxy would reduce attribution and expose geo-specific behavior.
-- Server-side redirects may start an external connection before Playwright can undo them. The
-  in-page navigation guard prevents script/button/window navigations before a request; Squid still
-  blocks private destinations. Chromium may preconnect to a public off-site host before routing can
-  answer 204, without loading its page.
-- Dead, timed-out, and TLS-failing sites may actually be geo-blocked. Their status and evidence
-  source stay separate from the verdict.
-- Disposable email uses mail.tm. SMS, KYC, CAPTCHA challenges, payments, real wallets, and external
-  app installation are never bypassed; `blocked_at` records the gate.
-- Addresses can be per-account or rotate. One synthetic account and one point-in-time run cannot
-  prove completeness. The mock verifies per-account behavior. Two real sites, 057 and 087, were
-  registered twice, about 13 hours apart with different synthetic identities, and showed the same
-  deposit addresses both times (3 and 4). So on those two sites the addresses are not per-account.
-  No other site was registered twice.
-- The browser element inventory covers the main frame; non-semantic clickables and coordinate
-  clicks are fallbacks, but unusual iframes/shadow DOM can still be missed.
-- Brand/domain lists were refined on this URL set, so their apparent performance may not
-  generalize. The labelled evaluation is small and class-imbalanced.
-- **Screenshots do not always show the address.** For 12 of the 22 primary addresses the
-  screenshot shows it on screen (11 boxed in red at discovery: sites 012, 027, 032, 109; one in
-  an open dialog: the XRP address on 087). For the other 10 (057 x3, 099 x2, 100 x2, and 087's
-  EVM, BTC and TRON) the file shows the right page, but the address was read from HTML
-  attributes or API responses that are not drawn on the screen, so it is not visible in the
-  picture. A live revisit that opens each dialog would capture them; that was not run.
-- Low-confidence findings are intentionally noisy. One marketplace API accounts for most of the
-  320 values; keeping them separate protects primary-address precision.
-
-No raw cookies, browser storage state, or secrets are published. The final artifact scan found no
-API/private-key patterns. All 342 published address details passed their format validator and
-blocklist check and have an existing screenshot file (which does not always show the address; see the
-limitations above). The final egress review found no allowed request
-to a private/risky destination or non-web port. Quality details are recorded in `docs/LOG.md`.
-
-## Alternatives and tradeoffs
-
-- An own Playwright loop was chosen over browser-use/Stagehand so network capture, policy checks,
-  per-site contexts, and traces remain explicit. `ElementProvider` keeps Stagehand swappable.
-- Hardened local Docker was chosen over Browserbase or a throwaway cloud server for schedule and
-  observability; it has the public-IP limitation above.
-- A plain Python state machine was clearer than LangGraph for this small graph.
-- Deterministic extraction precedes the LLM because checksums, blocklists, provenance, and exact
-  string reporting are testable. The LLM handles page meaning and navigation choices.
-- Batched form fills plus one final action reduced registration steps; each call is still checked
-  independently and execution stops at the first refusal.
-- The navigator trigger is the union of scam/uncertain judgment and structural cues (account flow,
-  wallet gate, or landing address). On the measured live set, this found all five useful
-  navigation-only addresses; the narrower alternatives each missed sites.
-
-The watched pilot exposed two policy failures: an image CAPTCHA text was typed and two off-site
-navigations began before being undone. Fixes added literal-source enforcement, structural CAPTCHA
-detection, a pre-request navigation guard, whole-story re-judging, proper minimum parsing,
-confirmation prompts that include pending fills, and browser-loss recovery. The full mock suite and
-final batch passed after those changes; the complete chronology is in
-[`docs/LOG.md`](docs/LOG.md).
+`confidence` is the chance the stated verdict is right: `scam_probability` for a scam,
+1 − `scam_probability` for not-scam.
 
 ## Troubleshooting
 
-- **Self-test fails:** do not run live targets. Confirm Docker Desktop is running, the router IP is
-  detectable (`make selftest ROUTER_IP=x.x.x.x` if needed), and ports/services are not stale; use
-  `make down`, then retry. There is intentionally no waiver.
+- **Self-test fails:** do not visit live sites. Check Docker Desktop is running and the router IP is
+  found (`make selftest ROUTER_IP=x.x.x.x` if needed); run `make down` and retry. There is
+  deliberately no override.
 - **A run stops or Chromium crashes:** rerun the same command with the same `RUN_ID` and
-  `ARGS="--resume …"`. Error and browser-loss records are retried in isolated fresh browsers.
-- **No model response:** verify `.env` contains the key and inspect the local gateway health/logs;
-  the crawler intentionally never receives the key directly.
+  `ARGS="--resume …"`. Failed records are retried, each in a fresh browser.
+- **No model response:** check that `.env` has the key and that the gateway container is healthy;
+  the browser container never gets the key.
 - **No site selected:** `--only` takes input numbers such as `--only 12,27`, not URLs.
-- **Changed scorer appears ineffective:** use `make rescore`, not a stale container image; the
-  target rebuilds first and reports gateway-cache hits separately from token use.
-- **Inspect a judgment:** `make review RUN=<id>` creates a CSP-locked local review page from saved
-  evidence. Do not open raw hostile HTML in a normal browser.
-
-## With more time
-
-Run from several regions; register twice on selected sites to measure address rotation; add a
-strictly non-signing mock wallet for wallet-gated flows; cluster the nine observed shared-shop
-templates into operator groups; improve iframe/shadow-DOM support; expand and rebalance the labelled
-set; and test a Stagehand-backed `ElementProvider` if element location becomes the dominant failure.
+- **A scorer change seems to have no effect:** use `make rescore`, which rebuilds the image first.
+- **Inspect a judgment:** `make review RUN=<id>` builds a local, script-free review page from
+  saved evidence. Do not open saved scam HTML in a normal browser.
