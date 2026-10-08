@@ -65,3 +65,11 @@ def test_only_scam_and_not_scam_labels_are_loaded(tmp_path: Path) -> None:
 def test_report_has_both_thresholds() -> None:
     out = ev.report(LABELS, RESULTS, (0.45, 0.5))
     assert set(out["thresholds"]) == {"0.45", "0.5"} and out["labelled"] == 4
+
+
+def test_labels_can_be_filtered_by_author(tmp_path: Path) -> None:
+    csv_path = tmp_path / "labels.csv"
+    csv_path.write_text("url,verdict,labeled_by\na,scam,alex\nb,not_scam,assistant\nc,scam,alex\n")
+    assert [r["url"] for r in ev.load_labels(csv_path, "alex")] == ["a", "c"]
+    assert [r["url"] for r in ev.load_labels(csv_path, "assistant")] == ["b"]
+    assert len(ev.load_labels(csv_path)) == 3

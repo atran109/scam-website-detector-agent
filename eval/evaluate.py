@@ -1,10 +1,11 @@
 """Precision/recall on verdicts and addresses against a labels file (M4; no visits).
 
     python eval/evaluate.py runs/<id>/output/results.json [--labels eval/labels.csv]
-                            [--thresholds 0.45 0.5] [--json out.json]
+                            [--thresholds 0.45 0.5] [--labeled-by alex] [--json out.json]
 
 Labels CSV columns: url, verdict (scam | not_scam; any other value is skipped), scam_type,
-expected_addresses ("|"-separated, exactly as shown on the site), label_basis, notes. A site is
+expected_addresses ("|"-separated, exactly as shown on the site), label_basis, notes, labeled_by
+(alex | assistant; `--labeled-by` scores one author's labels only). A site is
 predicted a scam at threshold t if its `scam_probability` is at least t, so one results file
 gives the whole 0.45 versus 0.5 comparison (DESIGN §5.4: the shipped threshold is 0.45, a lean
 toward recall). Address metrics use the exact strings of `crypto_addresses` (primary tier)."""
@@ -68,9 +69,10 @@ class AddressMetrics:
         return self.correct / self.expected if self.expected else None
 
 
-def load_labels(path: Path) -> list[dict]:
+def load_labels(path: Path, labeled_by: str | None = None) -> list[dict]:
     with path.open(newline="") as f:
-        return [r for r in csv.DictReader(f) if r.get("verdict") in ("scam", "not_scam")]
+        rows = [r for r in csv.DictReader(f) if r.get("verdict") in ("scam", "not_scam")]
+    return [r for r in rows if labeled_by is None or r.get("labeled_by") == labeled_by]
 
 
 def load_results(path: Path) -> dict[str, dict]:
@@ -190,9 +192,10 @@ def main() -> None:
     parser.add_argument("results", type=Path)
     parser.add_argument("--labels", type=Path, default=LABELS)
     parser.add_argument("--thresholds", type=float, nargs="+", default=list(DEFAULT_THRESHOLDS))
+    parser.add_argument("--labeled-by", help="only this author's labels (alex | assistant)")
     parser.add_argument("--json", type=Path, help="also write the report here")
     args = parser.parse_args()
-    labels = load_labels(args.labels)
+    labels = load_labels(args.labels, args.labeled_by)
     out = report(labels, load_results(args.results), tuple(args.thresholds))
     print_report(out)
     if args.json:
