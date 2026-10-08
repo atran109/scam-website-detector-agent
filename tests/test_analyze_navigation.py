@@ -174,6 +174,26 @@ def test_addresses_are_on_the_record_whatever_the_verdict(tmp_path: Path) -> Non
     assert result.other_addresses == []
 
 
+def test_an_address_gets_the_screenshot_that_shows_it(tmp_path: Path) -> None:
+    """The address is on the deposit page (a003); the last snapshot (a004) is another page. The
+    record must point at a003's picture, not the last snapshot's (087, LOG 2026-10-08)."""
+    analysis, _ = run_analyze(tmp_path, pilot_012(tmp_path, last_maintenance=True))
+    shot = analysis.addresses[0].sightings[0].screenshot_path
+    assert shot is not None and shot.endswith("a003/screenshot.png")
+
+
+def test_an_address_not_in_any_page_text_falls_back_to_the_last_snapshot(tmp_path: Path) -> None:
+    snaps = pilot_012(tmp_path, last_maintenance=True)
+    hidden = "0x76b10e09316c4c36c13bdb8b834953edb01659dc"
+    (tmp_path / "sites" / SITE.site_id / "snapshots" / "a003" / "text.txt").write_text("Deposit")
+    (tmp_path / "sites" / SITE.site_id / "snapshots" / "a003" / "page.html").write_text(
+        f'<button data-clipboard-text="{hidden}">Copy</button>'
+    )
+    analysis, _ = run_analyze(tmp_path, snaps)
+    shot = analysis.addresses[0].sightings[0].screenshot_path
+    assert shot is not None and shot.endswith("a004/screenshot.png")
+
+
 def test_merge_signals_keeps_the_heaviest_per_name() -> None:
     from scamhunter.models import Signal, SignalTier
 

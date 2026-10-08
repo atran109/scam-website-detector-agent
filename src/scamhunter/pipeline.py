@@ -321,19 +321,41 @@ async def capture_site(
 # ============================================================
 
 
+def _screenshot_showing(
+    address: CryptoAddress, run_dir: Path, snapshots: list[PageSnapshot]
+) -> str | None:
+    """The earliest saved screenshot whose page text contains the address, so the picture shows
+    it (a dialog opened by the agent, a deposit page). None if no screenshot does: an address
+    read from HTML attributes or API data is not on screen (LOG 2026-10-08)."""
+    wanted = address.address.lower()
+    for snap in snapshots:
+        text_file = (run_dir / snap.html_path).parent / "text.txt"
+        if snap.screenshot_path and text_file.exists():
+            if wanted in text_file.read_text(errors="ignore").lower():
+                return snap.screenshot_path
+    return None
+
+
 def _apply_highlights(
-    addresses: list[CryptoAddress], site_dir: Path, snapshots: list[PageSnapshot]
+    addresses: list[CryptoAddress],
+    site_dir: Path,
+    snapshots: list[PageSnapshot],
+    run_dir: Path,
 ) -> list[CryptoAddress]:
+    """Give each address the screenshot for its first sighting: the boxed highlight taken when
+    it was found; else the earliest snapshot whose page text shows it; else (read from HTML or
+    API data, so not on screen) the site's last snapshot."""
     path = site_dir / "highlights.json"
     highlights = json.loads(path.read_text()) if path.exists() else {}
     fallback = next((s.screenshot_path for s in reversed(snapshots) if s.screenshot_path), None)
     out = []
     for a in addresses:
         hl = highlights.get(a.dedupe_key)
+        shown = None if hl else _screenshot_showing(a, run_dir, snapshots)
         sightings = [
             s.model_copy(
                 update={
-                    "screenshot_path": hl["screenshot_path"] if hl else fallback,
+                    "screenshot_path": hl["screenshot_path"] if hl else (shown or fallback),
                     "bbox": tuple(hl["bbox"]) if hl else None,
                 }
             )
@@ -512,7 +534,7 @@ async def analyze(
         addresses = merge_all(
             addresses, extract(contents[snap.snapshot_id], ctx.blocklist, ignored)
         )
-    addresses = _apply_highlights(addresses, ctx.site_dir(site), snapshots)
+    addresses = _apply_highlights(addresses, ctx.site_dir(site), snapshots, ctx.run_dir)
     if ignored:
         notes.append(
             f"ignored {len(set(ignored))} token-contract address(es) "

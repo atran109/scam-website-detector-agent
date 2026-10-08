@@ -1,7 +1,7 @@
 {
   "meta": {
     "run_id": "m6-final-20261007",
-    "generated_at": "2026-10-08T04:26:59.483626Z",
+    "generated_at": "2026-10-08T20:57:22.834946Z",
     "total_urls": 160,
     "pipeline_version": "0.2.0",
     "scam_definition": "See README §Scam definition"
@@ -8733,7 +8733,7 @@
           ],
           "source": "dom_attribute",
           "stage": "authenticated",
-          "screenshot": "screenshots/087_516fce1cf79f.png",
+          "screenshot": "screenshots/087_bbd519bf2870.png",
           "sighting_count": 17
         }
       ],

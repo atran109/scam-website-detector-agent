@@ -265,12 +265,19 @@ Every input URL appears once and in input order. Fields omitted here are present
   clicks are fallbacks, but unusual iframes/shadow DOM can still be missed.
 - Brand/domain lists were refined on this URL set, so their apparent performance may not
   generalize. The labelled evaluation is small and class-imbalanced.
+- **Screenshots do not always show the address.** For 12 of the 22 primary addresses the
+  screenshot shows it on screen (11 boxed in red at discovery: sites 012, 027, 032, 109; one in
+  an open dialog: the XRP address on 087). For the other 10 (057 x3, 099 x2, 100 x2, and 087's
+  EVM, BTC and TRON) the file shows the right page, but the address was read from HTML
+  attributes or API responses that are not drawn on the screen, so it is not visible in the
+  picture. A live revisit that opens each dialog would capture them; that was not run.
 - Low-confidence findings are intentionally noisy. One marketplace API accounts for most of the
   320 values; keeping them separate protects primary-address precision.
 
 No raw cookies, browser storage state, or secrets are published. The final artifact scan found no
 API/private-key patterns. All 342 published address details passed their format validator and
-blocklist check and have an existing screenshot. The final egress review found no allowed request
+blocklist check and have an existing screenshot file (which does not always show the address; see the
+limitations above). The final egress review found no allowed request
 to a private/risky destination or non-web port. Quality details are recorded in `docs/LOG.md`.
 
 ## Alternatives and tradeoffs
