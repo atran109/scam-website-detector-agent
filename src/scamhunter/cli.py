@@ -1,4 +1,4 @@
-"""Entrypoints: run, triage, rescore, eval, report."""
+"""Entrypoints: triage, run, capture, classify, rescore, report, review and the mock runners."""
 
 import argparse
 import asyncio
@@ -432,7 +432,6 @@ def main(argv: list[str] | None = None) -> int:
     pmock.add_argument("--max-seconds", type=int, default=300)
     review = sub.add_parser("review", help="read-only HTML review page from saved evidence")
     review.add_argument("--run-id", required=True)
-    sub.add_parser("eval", help="not implemented yet (M4)")
 
     args = parser.parse_args(argv)
     handlers = {

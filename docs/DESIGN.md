@@ -121,7 +121,7 @@ scam-website-detector-agent/
 │   │   ├── page_state.py        # compact page representation for the LLM
 │   │   ├── elements.py          # ElementProvider: list_elements() / perform() — Playwright impl, Stagehand-swappable
 │   │   └── js/
-│   │       └── wallet_mock.js   # fake window.ethereum that records requests
+│   │       └── wallet_mock.js   # future work, not wired (mock wallet cut from v1)
 │   │
 │   ├── extract/
 │   │   ├── patterns.py          # regex candidate finders per format
@@ -153,7 +153,7 @@ scam-website-detector-agent/
 │   └── report/
 │       ├── writer.py            # final results.json
 │       ├── screenshots.py       # highlight address bounding boxes
-│       ├── clustering.py        # (P2) shared addresses / templates across sites
+│       ├── review.py            # read-only HTML review page (clustering: future work, not built)
 │       └── summary.py           # run statistics
 │
 ├── eval/
@@ -221,7 +221,7 @@ make run ARGS="--only 17,42 --no-agent"      # subset / debugging
 make selftest                                # proves egress rules work before any real visit
 make run ARGS="--resume runs/2026-10-04T10-00"
 make rescore RUN=runs/2026-10-04T10-00       # re-classify from saved evidence; no site visits
-make eval                                    # compare against eval/labels.csv
+make eval RUN=<id>                           # compare against eval/labels.csv (runs eval/evaluate.py)
 make report RUN=runs/2026-10-04T10-00        # publish a run's results into output/ (runs write to runs/<id>/output/)
 # Optional: add richer address evidence from another saved run without changing classifications:
 make report RUN=runs/final ARGS="--supplement-run pilot-id"
