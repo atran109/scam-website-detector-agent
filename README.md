@@ -64,7 +64,9 @@ not independent of the system they evaluate, so the 8-label figures are the hone
 **Provenance.** One published record merges two saved runs. Site 012 (`bradfordtradeins.com`)
 keeps the final run's classification, but its addresses and `navigation` summary come from pilot
 run `pilot-20261007b`. The final run hit its 180 s navigation limit after BTC and EVM; the pilot,
-at 300 s, also reached the TRON address. The record's `notes` say so. No other record is merged.
+at 300 s, also reached the TRON address. The record's `notes` say so. No other record is merged:
+a targeted rerun of 057, 061, 067 and 087 at 300 s (`nav-rerun-20261008`, $0.45) found no new
+addresses, and a saved run is merged only when it adds addresses to the published set.
 
 The accepted full run and crash recovery cost approximately $4.12. Each cached rescore, including
 the one that applied the dead-site rule, cost $0.00; preserved per-site accounting totals 2,724,575 input and 87,888 output tokens. The local
@@ -247,7 +249,10 @@ Every input URL appears once and in input order. Fields omitted here are present
 - Disposable email uses mail.tm. SMS, KYC, CAPTCHA challenges, payments, real wallets, and external
   app installation are never bypassed; `blocked_at` records the gate.
 - Addresses can be per-account or rotate. One synthetic account and one point-in-time run cannot
-  prove completeness. The mock verifies per-account behavior; real sites were not registered twice.
+  prove completeness. The mock verifies per-account behavior. Two real sites, 057 and 087, were
+  registered twice, about 13 hours apart with different synthetic identities, and showed the same
+  deposit addresses both times (3 and 4). So on those two sites the addresses are not per-account.
+  No other site was registered twice.
 - The browser element inventory covers the main frame; non-semantic clickables and coordinate
   clicks are fallbacks, but unusual iframes/shadow DOM can still be missed.
 - Brand/domain lists were refined on this URL set, so their apparent performance may not
