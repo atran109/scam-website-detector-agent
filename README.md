@@ -158,7 +158,7 @@ browser or container. Restrict Docker's file sharing to this project directory i
 ```bash
 git clone <private-repository-url>
 cd scam-website-detector-agent
-make check                                   # pinned venv, lint, 650 unit tests
+make check                                   # pinned venv, lint, 654 unit tests
 .venv/bin/python eval/evaluate.py output/results.json   # accuracy table from the published file
 cp .env.example .env && make test-browser    # optional: 47 Chromium tests, offline container
 ```
