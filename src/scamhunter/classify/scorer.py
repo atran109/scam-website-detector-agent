@@ -15,7 +15,6 @@ from scamhunter.models import (
     LLMJudgment,
     ScamType,
     Signal,
-    SignalTier,
     Verdict,
 )
 
@@ -26,7 +25,6 @@ PARTIAL_BOUNDS = (0.2, 0.8)
 WAYBACK_SHRINK = 0.8  # DESIGN §5.2a
 SIGNALS_ONLY_BAND = (0.5, 0.65)
 NOTHING_P = 0.4
-DEAD_SITE_MIN_WEAK = 3
 
 # Hard rules (DESIGN §5.4): signal name → (floor on scam probability, scam type).
 HARD_RULES: dict[str, tuple[float, ScamType]] = {
@@ -137,11 +135,29 @@ def score_content(
 # used for live sites, where it is one weak signal among many (to be re-measured, see PLAN M4).
 DEAD_SITE_IGNORED = frozenset({"finance_terms_in_domain"})
 
+# The only signals that lean a no-content site toward scam (policy A, LOG 2026-10-08, from
+# eval/dead_site_rule_report.py on the final run). random_looking_domain was measured (7 of 34
+# live scams, 0 of 11 live not_scam). The brand, takedown and sibling signals were too rare on
+# live sites to measure and are kept on their merits: impersonation or a hosting takedown is
+# evidence by itself. Listed but not counted: cheap TLDs (18:3, weak separation), invalid TLS,
+# free hosting and mobile hosts (too rare, no separation). Matched by name before any ":".
+DEAD_SITE_EVIDENCE = frozenset(
+    {
+        "random_looking_domain",
+        "brand_in_domain",
+        "brand_typosquat",
+        "hosting_suspended",
+        "sibling_of_scam",
+    }
+)
+
 
 def score_without_content(
     signals: list[Signal], threshold: float, status_note: str
 ) -> Classification:
-    """Dead-site policy steps 2-3 (DESIGN §5.2a): no page content to judge."""
+    """Dead-site policy steps 2-3 (DESIGN §5.2a): no page content to judge. A phishing warning
+    page is a hard rule; any `DEAD_SITE_EVIDENCE` signal leans scam (0.5 + 0.05 per weight unit,
+    at most 0.65); otherwise not_scam at 0.4, `signals_only` if other signals fired, else `none`."""
     signals = [s for s in signals if s.name not in DEAD_SITE_IGNORED]
     for s in signals:
         if s.name in HARD_RULES:
@@ -157,17 +173,16 @@ def score_without_content(
                 EvidenceSource.SIGNALS_ONLY,
             )
     scored = [s for s in signals if s.weight > 0]
-    has_moderate = any(s.tier in {SignalTier.MODERATE, SignalTier.STRONG} for s in scored)
-    weak_count = sum(s.tier == SignalTier.WEAK for s in scored)
-    if has_moderate or weak_count >= DEAD_SITE_MIN_WEAK:
-        total = sum(s.weight for s in scored)
+    counted = [s for s in scored if s.name.split(":")[0] in DEAD_SITE_EVIDENCE]
+    if counted:
+        total = sum(s.weight for s in counted)
         p = min(SIGNALS_ONLY_BAND[0] + 0.05 * total, SIGNALS_ONLY_BAND[1])
         return _finish(
             p,
             threshold,
             _type_from_signals(signals),
             f"{status_note}; no content to assess. Leans scam on indirect signals: "
-            f"{_signal_summary(scored)}.",
+            f"{_signal_summary(counted)}.",
             signals,
             None,
             "status_rule",
@@ -178,9 +193,8 @@ def score_without_content(
             NOTHING_P,
             threshold,
             None,
-            f"{status_note}; no content to assess and indirect evidence is insufficient "
-            f"(need a moderate signal or {DEAD_SITE_MIN_WEAK} weak signals): "
-            f"{_signal_summary(scored)}.",
+            f"{status_note}; no content to assess, and these signals do not separate scams "
+            f"from other sites without content: {_signal_summary(scored)}.",
             signals,
             None,
             "status_rule",

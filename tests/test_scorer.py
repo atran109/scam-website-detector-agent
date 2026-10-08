@@ -150,17 +150,29 @@ def test_dead_site_policy() -> None:
     assert warned.verdict == Verdict.SCAM and warned.scam_probability >= 0.85
 
 
-def test_dead_site_weak_signals_need_three() -> None:
-    weak = [
-        Signal(name=f"weak_{i}", tier=SignalTier.WEAK, weight=0.5, evidence="x", source="domain")
-        for i in range(3)
-    ]
-    one = score_without_content(weak[:1], T, "DNS does not resolve")
-    three = score_without_content(weak, T, "DNS does not resolve")
+def test_dead_site_counts_only_kept_signals() -> None:
+    """Policy A (LOG 2026-10-08): only DEAD_SITE_EVIDENCE signals lean a no-content site scam."""
 
-    assert one.verdict == Verdict.NOT_SCAM
-    assert one.evidence_source == EvidenceSource.SIGNALS_ONLY
-    assert three.verdict == Verdict.SCAM
+    def sig(name: str, tier: SignalTier, weight: float) -> Signal:
+        return Signal(name=name, tier=tier, weight=weight, evidence="x", source="domain")
+
+    unmeasured = [
+        sig("cheap_tld:.xyz", SignalTier.WEAK, 0.5),
+        sig("invalid_tls_cert", SignalTier.WEAK, 0.5),
+        sig("mobile_app_host", SignalTier.WEAK, 0.5),
+        sig("free_hosting", SignalTier.MODERATE, 1.0),
+    ]
+    rest = score_without_content(unmeasured, T, "DNS does not resolve")
+    assert rest.verdict == Verdict.NOT_SCAM and rest.scam_probability == 0.4
+    assert rest.evidence_source == EvidenceSource.SIGNALS_ONLY
+
+    random_name = score_without_content(
+        [*unmeasured[:1], sig("random_looking_domain", SignalTier.WEAK, 0.5)], T, "x"
+    )
+    assert random_name.verdict == Verdict.SCAM and random_name.scam_probability == 0.525
+
+    takedown = score_without_content([sig("hosting_suspended", SignalTier.MODERATE, 1.0)], T, "x")
+    assert takedown.verdict == Verdict.SCAM and takedown.scam_probability == 0.55
 
 
 # ---------- random-looking domains ----------

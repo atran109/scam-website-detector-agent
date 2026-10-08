@@ -1,7 +1,7 @@
 {
   "meta": {
     "run_id": "m6-final-20261007",
-    "generated_at": "2026-10-07T16:47:24.746934Z",
+    "generated_at": "2026-10-08T04:26:59.483626Z",
     "total_urls": 160,
     "pipeline_version": "0.2.0",
     "scam_definition": "See README §Scam definition"
@@ -34,13 +34,13 @@
       "final_url": null,
       "status": "dns_failure",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.xyz, random_looking_domain.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.xyz",
         "random_looking_domain"
@@ -90,7 +90,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.cloud, invalid_tls_cert.",
+      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.cloud, invalid_tls_cert.",
       "signals": [
         "cheap_tld:.cloud",
         "invalid_tls_cert"
@@ -262,7 +262,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.xyz.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.xyz.",
       "signals": [
         "cheap_tld:.xyz"
       ],
@@ -434,7 +434,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.xyz.",
+      "reasoning": "timeout (connect timed out); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.xyz.",
       "signals": [
         "cheap_tld:.xyz"
       ],
@@ -454,13 +454,13 @@
       "final_url": null,
       "status": "dns_failure",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.cc, random_looking_domain.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.cc",
         "random_looking_domain"
@@ -482,10 +482,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.6,
-      "confidence": 0.6,
+      "scam_probability": 0.55,
+      "confidence": 0.55,
       "evidence_source": "signals_only",
-      "reasoning": "suspended (HTTP 402 (hosting/store suspended)); no content to assess. Leans scam on indirect signals: free_hosting, hosting_suspended.",
+      "reasoning": "suspended (HTTP 402 (hosting/store suspended)); no content to assess. Leans scam on indirect signals: hosting_suspended.",
       "signals": [
         "free_hosting",
         "hosting_suspended"
@@ -510,7 +510,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "parked (rendered page is a parking page (parked marker \"has expired and may be available\")); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.cc.",
+      "reasoning": "parked (rendered page is a parking page (parked marker \"has expired and may be available\")); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.cc.",
       "signals": [
         "cheap_tld:.cc"
       ],
@@ -536,7 +536,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "http_error (HTTP 404); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.fun.",
+      "reasoning": "http_error (HTTP 404); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.fun.",
       "signals": [
         "cheap_tld:.fun"
       ],
@@ -664,13 +664,13 @@
       "final_url": "https://datahydru602.com/index.html",
       "status": "empty",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "empty (rendered page is a page with no content (maintenance placeholder \"網站維護中\")); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "empty (rendered page is a page with no content (maintenance placeholder \"網站維護中\")); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -722,7 +722,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.info.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.info.",
       "signals": [
         "cheap_tld:.info"
       ],
@@ -740,13 +740,13 @@
       "final_url": null,
       "status": "tls_error",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.shop, random_looking_domain.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.shop",
         "random_looking_domain"
@@ -852,7 +852,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): invalid_tls_cert.",
+      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess, and these signals do not separate scams from other sites without content: invalid_tls_cert.",
       "signals": [
         "invalid_tls_cert"
       ],
@@ -6416,13 +6416,13 @@
       "final_url": "https://gete84.com",
       "status": "parked",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain, invalid_tls_cert.",
+      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain",
         "invalid_tls_cert"
@@ -6447,7 +6447,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.international.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.international.",
       "signals": [
         "cheap_tld:.international"
       ],
@@ -6465,13 +6465,13 @@
       "final_url": null,
       "status": "timeout",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "timeout (connect timed out); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -6494,10 +6494,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.625,
-      "confidence": 0.625,
+      "scam_probability": 0.575,
+      "confidence": 0.575,
       "evidence_source": "signals_only",
-      "reasoning": "http_error (HTTP 522); no content to assess. Leans scam on indirect signals: brand_in_domain:bitmain, cheap_tld:.cc, mobile_app_host.",
+      "reasoning": "http_error (HTTP 522); no content to assess. Leans scam on indirect signals: brand_in_domain:bitmain.",
       "signals": [
         "cheap_tld:.cc",
         "brand_in_domain:bitmain",
@@ -6520,10 +6520,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.6,
-      "confidence": 0.6,
+      "scam_probability": 0.575,
+      "confidence": 0.575,
       "evidence_source": "signals_only",
-      "reasoning": "http_error (HTTP 522); no content to assess. Leans scam on indirect signals: brand_in_domain:bitmain, mobile_app_host.",
+      "reasoning": "http_error (HTTP 522); no content to assess. Leans scam on indirect signals: brand_in_domain:bitmain.",
       "signals": [
         "brand_in_domain:bitmain",
         "mobile_app_host"
@@ -6545,10 +6545,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.65,
-      "confidence": 0.65,
+      "scam_probability": 0.6,
+      "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess. Leans scam on indirect signals: brand_in_domain:bitxex, cheap_tld:.quest, random_looking_domain, mobile_app_host.",
+      "reasoning": "timeout (connect timed out); no content to assess. Leans scam on indirect signals: brand_in_domain:bitxex, random_looking_domain.",
       "signals": [
         "cheap_tld:.quest",
         "brand_in_domain:bitxex",
@@ -6574,10 +6574,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.6,
-      "confidence": 0.6,
+      "scam_probability": 0.575,
+      "confidence": 0.575,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess. Leans scam on indirect signals: brand_in_domain:mitrade, mobile_app_host.",
+      "reasoning": "timeout (connect timed out); no content to assess. Leans scam on indirect signals: brand_in_domain:mitrade.",
       "signals": [
         "brand_in_domain:mitrade",
         "mobile_app_host"
@@ -6604,7 +6604,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.top.",
+      "reasoning": "timeout (connect timed out); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.top.",
       "signals": [
         "cheap_tld:.top"
       ],
@@ -6630,7 +6630,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.top, invalid_tls_cert.",
+      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.top, invalid_tls_cert.",
       "signals": [
         "cheap_tld:.top",
         "invalid_tls_cert"
@@ -6815,7 +6815,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.xyz.",
+      "reasoning": "timeout (connect timed out); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.xyz.",
       "signals": [
         "cheap_tld:.xyz"
       ],
@@ -6922,7 +6922,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): mobile_app_host.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess, and these signals do not separate scams from other sites without content: mobile_app_host.",
       "signals": [
         "mobile_app_host"
       ],
@@ -7060,10 +7060,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.575,
-      "confidence": 0.575,
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: cheap_tld:.click, random_looking_domain, mobile_app_host.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.click",
         "random_looking_domain",
@@ -7086,10 +7086,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.6,
-      "confidence": 0.6,
+      "scam_probability": 0.575,
+      "confidence": 0.575,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess. Leans scam on indirect signals: brand_in_domain:bfx, cheap_tld:.top.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess. Leans scam on indirect signals: brand_in_domain:bfx.",
       "signals": [
         "cheap_tld:.top",
         "brand_in_domain:bfx"
@@ -7244,13 +7244,13 @@
       "final_url": null,
       "status": "dns_failure",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -7445,7 +7445,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.live.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.live.",
       "signals": [
         "cheap_tld:.live"
       ],
@@ -7574,7 +7574,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.xyz.",
+      "reasoning": "timeout (connect timed out); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.xyz.",
       "signals": [
         "cheap_tld:.xyz"
       ],
@@ -8411,13 +8411,13 @@
       "final_url": null,
       "status": "dns_failure",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.xyz, random_looking_domain.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.xyz",
         "random_looking_domain"
@@ -8765,10 +8765,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.625,
-      "confidence": 0.625,
+      "scam_probability": 0.575,
+      "confidence": 0.575,
       "evidence_source": "signals_only",
-      "reasoning": "http_error (HTTP 404); no content to assess. Leans scam on indirect signals: brand_in_domain:tiktok, free_hosting.",
+      "reasoning": "http_error (HTTP 404); no content to assess. Leans scam on indirect signals: brand_in_domain:tiktok.",
       "signals": [
         "free_hosting",
         "brand_in_domain:tiktok"
@@ -8840,7 +8840,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.gold.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.gold.",
       "signals": [
         "cheap_tld:.gold"
       ],
@@ -8858,13 +8858,13 @@
       "final_url": null,
       "status": "dns_failure",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.online, random_looking_domain.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.online",
         "random_looking_domain"
@@ -8883,13 +8883,13 @@
       "final_url": null,
       "status": "tls_error",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.store, random_looking_domain.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.store",
         "random_looking_domain"
@@ -8985,7 +8985,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.click.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.click.",
       "signals": [
         "cheap_tld:.click"
       ],
@@ -9207,10 +9207,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.575,
-      "confidence": 0.575,
+      "scam_probability": 0.55,
+      "confidence": 0.55,
       "evidence_source": "signals_only",
-      "reasoning": "suspended (HTTP 402 (hosting/store suspended); TLS certificate invalid (fetched unverified)); no content to assess. Leans scam on indirect signals: hosting_suspended, invalid_tls_cert.",
+      "reasoning": "suspended (HTTP 402 (hosting/store suspended); TLS certificate invalid (fetched unverified)); no content to assess. Leans scam on indirect signals: hosting_suspended.",
       "signals": [
         "hosting_suspended",
         "invalid_tls_cert"
@@ -9279,7 +9279,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.top.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.top.",
       "signals": [
         "cheap_tld:.top"
       ],
@@ -9329,7 +9329,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.top.",
+      "reasoning": "timeout (connect timed out); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.top.",
       "signals": [
         "cheap_tld:.top"
       ],
@@ -9376,10 +9376,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.625,
-      "confidence": 0.625,
+      "scam_probability": 0.575,
+      "confidence": 0.575,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess. Leans scam on indirect signals: brand_in_domain:bitget, cheap_tld:.shop, mobile_app_host.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess. Leans scam on indirect signals: brand_in_domain:bitget.",
       "signals": [
         "cheap_tld:.shop",
         "brand_in_domain:bitget",
@@ -9481,7 +9481,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.store.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.store.",
       "signals": [
         "cheap_tld:.store"
       ],
@@ -9553,7 +9553,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.vip.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.vip.",
       "signals": [
         "cheap_tld:.vip"
       ],
@@ -9619,13 +9619,13 @@
       "final_url": null,
       "status": "dns_failure",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -9723,7 +9723,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.xin.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.xin.",
       "signals": [
         "cheap_tld:.xin"
       ],
@@ -9747,7 +9747,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.cfd.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.cfd.",
       "signals": [
         "cheap_tld:.cfd"
       ],
@@ -9840,13 +9840,13 @@
       "final_url": null,
       "status": "tls_error",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -9923,13 +9923,13 @@
       "final_url": "https://www.feyru.work",
       "status": "http_error",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "http_error (HTTP 521); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.work, random_looking_domain.",
+      "reasoning": "http_error (HTTP 521); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.work",
         "random_looking_domain"
@@ -10082,13 +10082,13 @@
       "final_url": null,
       "status": "dns_failure",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -10156,7 +10156,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.top.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.top.",
       "signals": [
         "cheap_tld:.top"
       ],
@@ -10180,7 +10180,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.click.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.click.",
       "signals": [
         "cheap_tld:.click"
       ],
@@ -10247,10 +10247,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.625,
-      "confidence": 0.625,
+      "scam_probability": 0.575,
+      "confidence": 0.575,
       "evidence_source": "signals_only",
-      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess. Leans scam on indirect signals: brand_in_domain:poizvip, cheap_tld:.cc, invalid_tls_cert.",
+      "reasoning": "parked (parking provider fingerprint \"parklogic\"; TLS certificate invalid (fetched unverified)); no content to assess. Leans scam on indirect signals: brand_in_domain:poizvip.",
       "signals": [
         "cheap_tld:.cc",
         "brand_in_domain:poizvip",
@@ -10270,13 +10270,13 @@
       "final_url": null,
       "status": "dns_failure",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -10368,7 +10368,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "http_error (HTTP 525); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.art.",
+      "reasoning": "http_error (HTTP 525); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.art.",
       "signals": [
         "cheap_tld:.art"
       ],
@@ -10392,7 +10392,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.sbs.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.sbs.",
       "signals": [
         "cheap_tld:.sbs"
       ],
@@ -10449,7 +10449,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "tls_error (TLS handshake failed); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.store.",
+      "reasoning": "tls_error (TLS handshake failed); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.store.",
       "signals": [
         "cheap_tld:.store"
       ],
@@ -10469,13 +10469,13 @@
       "final_url": null,
       "status": "timeout",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "timeout (connect timed out); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "timeout (connect timed out); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -10495,13 +10495,13 @@
       "final_url": "https://www.usdcsyh.com",
       "status": "http_error",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "http_error (HTTP 522); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): random_looking_domain.",
+      "reasoning": "http_error (HTTP 522); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "random_looking_domain"
       ],
@@ -10643,13 +10643,13 @@
       "final_url": "https://www.yqeydfhr.cc",
       "status": "empty",
       "processing_status": "completed",
-      "classification": "not_scam",
-      "is_scam": false,
-      "scam_type": null,
-      "scam_probability": 0.4,
-      "confidence": 0.6,
+      "classification": "scam",
+      "is_scam": true,
+      "scam_type": "other",
+      "scam_probability": 0.525,
+      "confidence": 0.525,
       "evidence_source": "signals_only",
-      "reasoning": "empty (default server page \"welcome to nginx!\"); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.cc, random_looking_domain.",
+      "reasoning": "empty (default server page \"welcome to nginx!\"); no content to assess. Leans scam on indirect signals: random_looking_domain.",
       "signals": [
         "cheap_tld:.cc",
         "random_looking_domain"
@@ -10671,10 +10671,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.625,
-      "confidence": 0.625,
+      "scam_probability": 0.6,
+      "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "http_error (HTTP 522); no content to assess. Leans scam on indirect signals: brand_in_domain:zfx, cheap_tld:.vip, random_looking_domain.",
+      "reasoning": "http_error (HTTP 522); no content to assess. Leans scam on indirect signals: brand_in_domain:zfx, random_looking_domain.",
       "signals": [
         "cheap_tld:.vip",
         "brand_in_domain:zfx",
@@ -10801,10 +10801,10 @@
       "classification": "scam",
       "is_scam": true,
       "scam_type": "other",
-      "scam_probability": 0.575,
-      "confidence": 0.575,
+      "scam_probability": 0.55,
+      "confidence": 0.55,
       "evidence_source": "signals_only",
-      "reasoning": "suspended (suspended marker \"account has been suspended\"; TLS certificate invalid (fetched unverified)); no content to assess. Leans scam on indirect signals: hosting_suspended, invalid_tls_cert.",
+      "reasoning": "suspended (suspended marker \"account has been suspended\"; TLS certificate invalid (fetched unverified)); no content to assess. Leans scam on indirect signals: hosting_suspended.",
       "signals": [
         "hosting_suspended",
         "invalid_tls_cert"
@@ -10829,7 +10829,7 @@
       "scam_probability": 0.4,
       "confidence": 0.6,
       "evidence_source": "signals_only",
-      "reasoning": "dns_failure (host does not resolve); no content to assess and indirect evidence is insufficient (need a moderate signal or 3 weak signals): cheap_tld:.live.",
+      "reasoning": "dns_failure (host does not resolve); no content to assess, and these signals do not separate scams from other sites without content: cheap_tld:.live.",
       "signals": [
         "cheap_tld:.live"
       ],

@@ -12,7 +12,7 @@ The final run (`m6-final-20261007`) completed all 160 records with no partial or
 
 | Result | Count |
 |---|---:|
-| Scam / not scam | 59 / 101 |
+| Scam / not scam | 77 / 83 (live content 34 / 11) |
 | Live / non-live at final triage | 43 / 117 |
 | Primary address findings | 19 (17 unique) on 8 sites |
 | Low-confidence findings | 320 (319 unique) on 2 sites |
@@ -22,9 +22,36 @@ The final run (`m6-final-20261007`) completed all 160 records with no partial or
 | Address-label precision / recall | 100% / 100% (3/3) |
 
 The status breakdown is 53 DNS failures, 43 live, 19 HTTP errors, 15 TLS errors, 10 timeouts,
-8 empty, 6 parked, and 6 suspended. Of 68 records judged from indirect signals only, 22 met the
-calibrated scam rule; 46 were left not-scam with low confidence. Another 42 had no usable
-evidence and 5 used Wayback snapshots.
+8 empty, 6 parked, and 6 suspended.
+
+Verdicts by `evidence_source` (filter on it; the dead-site rows are leans, not findings):
+
+| `evidence_source` | Scam | Not scam |
+|---|---:|---:|
+| `live` (page content, judged) | 34 | 11 |
+| `wayback` (archived page, judged, shrunk toward 0.5) | 3 | 2 |
+| `signals_only` (no content, domain or probe signals) | 40 | 28 |
+| `none` (no content, no signal) | 0 | 42 |
+
+**Dead-site rule.** Chosen from the final run's data with `eval/dead_site_rule_report.py`, with no
+site visits.
+
+- **The rule.** A site without content leans scam (p 0.5–0.65) only on a machine-generated-looking
+  name (`random_looking_domain`), a brand in a domain the brand does not own, a brand typosquat, a
+  hosting-takedown page, or a sibling domain judged a scam. A provider phishing warning stays a
+  hard rule. Anything else (cheap TLD, invalid certificate, free hosting, mobile host, finance
+  words) is listed but gives not-scam at p 0.4.
+- **The data.** On the 45 live-content sites (34 scam, 11 not), `random_looking_domain` fired on 7
+  scams and 0 others. Cheap TLDs separated weakly (18 vs 3). Finance words did not separate at all
+  (12 vs 4, the same rate on both). The brand, typosquat and takedown signals were too rare on live
+  sites to measure (at most 4 each), so they are kept on their merits. Caveat: the judge saw these
+  signals and the URL, so live verdicts are not independent of them.
+- **The rules not chosen,** on the same 110 no-content records:
+  - the previous rule (any moderate signal or three weak ones): 22 scam / 88 not;
+  - treating every unknown site at the live base rate (75.6%, shrunk to p 0.70): 110 / 0;
+  - only the one measured signal: 23 / 87, which drops every brand-impersonation lean.
+
+  The chosen rule gives 40 / 70. It flipped 18 sites to scam, all on a random-looking name.
 
 The 25-site hand-label set has TP=21, FP=0, FN=1, TN=3 at both 0.45 and 0.50 thresholds. This is
 a small, deliberately reviewable sample—not a population accuracy claim. The labels are skewed
@@ -39,8 +66,8 @@ keeps the final run's classification, but its addresses and `navigation` summary
 run `pilot-20261007b`. The final run hit its 180 s navigation limit after BTC and EVM; the pilot,
 at 300 s, also reached the TRON address. The record's `notes` say so. No other record is merged.
 
-The accepted full run and crash recovery cost approximately $4.12. A final cached rescore cost
-$0.00; preserved per-site accounting totals 2,724,575 input and 87,888 output tokens. The local
+The accepted full run and crash recovery cost approximately $4.12. Each cached rescore, including
+the one that applied the dead-site rule, cost $0.00; preserved per-site accounting totals 2,724,575 input and 87,888 output tokens. The local
 mock regression separately passed all 13 variants (10 solvable and 3 gated).
 
 ## What “scam” means
@@ -59,9 +86,9 @@ Evidence is tiered:
   domain.
 
 For live content, a Claude judgment is fused with deterministic signals. For a site without usable
-content, the pipeline tries a saved Wayback page, then calls it scam only with at least one
-moderate/strong signal or at least three weak signals. Otherwise it emits not-scam at low
-confidence. `evidence_source` makes that distinction explicit.
+content, the pipeline tries a saved Wayback page, then calls it scam only if the domain looks
+machine-generated, names a brand it does not belong to, or the host shows a takedown page (the
+dead-site rule, below). Otherwise it emits not-scam at low confidence. `evidence_source` makes that distinction explicit.
 
 ## Architecture
 

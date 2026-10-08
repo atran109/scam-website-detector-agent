@@ -27,8 +27,8 @@ test-browser:
 	docker compose --profile test run --rm browser-tests
 
 lint: venv
-	$(BIN)/ruff check src tests eval docker
-	$(BIN)/ruff format --check src tests eval docker
+	$(BIN)/ruff check src tests eval docker scripts
+	$(BIN)/ruff format --check src tests eval docker scripts
 
 # Run before every commit: lint (incl. formatting) + unit tests.
 check: lint test
