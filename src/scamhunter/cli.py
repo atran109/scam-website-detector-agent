@@ -219,7 +219,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     if OUTPUT_DIR.exists():
         shutil.rmtree(OUTPUT_DIR / "screenshots", ignore_errors=True)
     shutil.copytree(src / "output", OUTPUT_DIR, dirs_exist_ok=True)
-    supplemented = supplement_address_evidence(
+    supplemented, conflicts = supplement_address_evidence(
         OUTPUT_DIR / "results.json",
         [(run_id, RUNS_DIR / run_id / "output") for run_id in args.supplement_run],
         OUTPUT_DIR,
@@ -230,6 +230,8 @@ def cmd_report(args: argparse.Namespace) -> int:
             f"supplemented address evidence for {len(supplemented)} URL(s) from saved run(s): "
             + ", ".join(supplemented)
         )
+    if conflicts:
+        print(f"NOT merged, address sets differ (see each record's notes): {', '.join(conflicts)}")
     return 0
 
 

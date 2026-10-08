@@ -1,6 +1,7 @@
 """Flatten SiteResults into output/results.json (ResultsFile)."""
 
 import hashlib
+import re
 import shutil
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -19,6 +20,35 @@ from scamhunter.models import (
 )
 
 SCAM_DEFINITION = "See README §Scam definition"
+
+# A query parameter that names a client IP and holds an IPv4 address. Scam redirect URLs echo the
+# visitor IP they saw (site 084: `recaptcha.cloud/?…&ip=<the operator's home IP>…`, LOG
+# 2026-10-08); recorded URLs are evidence, but the operator's address must not be published.
+_IP_PARAM = re.compile(r"([?&][a-z_]*ip=)\d{1,3}(?:\.\d{1,3}){3}\b", re.I)
+
+
+def redact_ip(url: str) -> str:
+    """The URL with any IP-valued `…ip=` query parameter replaced by `<redacted>`."""
+    return _IP_PARAM.sub(r"\1<redacted>", url)
+
+
+def _redact_navigation(nav: NavigationSummary | None) -> NavigationSummary | None:
+    if nav is None:
+        return None
+    return nav.model_copy(
+        update={
+            "linked_domains": [redact_ip(u) for u in nav.linked_domains],
+            "hops": [
+                h.model_copy(
+                    update={
+                        "source_url": redact_ip(h.source_url),
+                        "target_url": redact_ip(h.target_url),
+                    }
+                )
+                for h in nav.hops
+            ],
+        }
+    )
 
 
 def primary_sighting(address: CryptoAddress) -> Sighting:
@@ -85,17 +115,19 @@ def to_record(result: SiteResult, run_dir: Path, out_dir: Path) -> OutputRecord:
         low_confidence_addresses=[a.address for a in result.low_confidence_addresses],
         address_details=details,
         app_download_urls=result.app_downloads,
-        navigation=NavigationSummary(
-            registered=nav.registered,
-            reached_deposit=nav.reached_deposit,
-            steps=len(nav.steps),
-            stop_reason=nav.stop_reason,
-            blocked_at=nav.blocked_at,
-            linked_domains=nav.linked_domains,
-            hops=nav.hops,
-        )
-        if nav
-        else None,
+        navigation=_redact_navigation(
+            NavigationSummary(
+                registered=nav.registered,
+                reached_deposit=nav.reached_deposit,
+                steps=len(nav.steps),
+                stop_reason=nav.stop_reason,
+                blocked_at=nav.blocked_at,
+                linked_domains=nav.linked_domains,
+                hops=nav.hops,
+            )
+            if nav
+            else None
+        ),
         notes=result.notes,
     )
 
@@ -126,23 +158,50 @@ def write_results(
     return path
 
 
+def _address_keys(record: OutputRecord) -> set[str]:
+    """Primary addresses of a record by format-aware key (EVM case-insensitive)."""
+    return {
+        d.normalized.lower() if d.format.value == "evm" else d.normalized
+        for d in record.address_details
+        if d.tier.value == "primary"
+    }
+
+
 def supplement_address_evidence(
     primary_path: Path, supplements: Sequence[tuple[str, Path]], out_dir: Path
-) -> list[str]:
-    """Use a saved run's record when it found more primary addresses for the same URL.
+) -> tuple[list[str], list[str]]:
+    """Use a saved run's record when it found strictly more primary addresses for the same URL,
+    *including every address already published* (a superset).
 
     Classification stays from the primary run; only address evidence and the more complete
-    navigation summary move over. This lets the published report use repeat-run discoveries
-    without revisiting a target or silently hand-editing JSON.
-    """
+    navigation summary move over, with a provenance note. A saved run whose addresses are not a
+    superset (for example a new account given other per-account addresses) is not merged: the
+    record gets a note and the URL is returned as a conflict for a person to resolve. Returns
+    (merged urls, conflict urls). Visitor IPs in recorded URLs are redacted on every record.
+    No target is revisited and no JSON is hand-edited."""
     primary = ResultsFile.model_validate_json(primary_path.read_text())
     records = {record.url: record for record in primary.results}
     changed: list[str] = []
+    conflicts: list[str] = []
     for run_id, supplement_dir in supplements:
         supplement = ResultsFile.model_validate_json((supplement_dir / "results.json").read_text())
         for candidate in supplement.results:
             current = records.get(candidate.url)
-            if current is None or len(candidate.crypto_addresses) <= len(current.crypto_addresses):
+            if current is None:
+                continue
+            have, offered = _address_keys(current), _address_keys(candidate)
+            if not offered - have:
+                continue  # nothing new
+            if not have <= offered:
+                note = (
+                    f"saved run {run_id} found a different address set "
+                    f"({len(offered - have)} new, {len(have - offered)} not seen again); not merged"
+                )
+                if note not in current.notes:
+                    records[candidate.url] = current.model_copy(
+                        update={"notes": [*current.notes, note]}
+                    )
+                conflicts.append(candidate.url)
                 continue
             for detail in candidate.address_details:
                 if not detail.screenshot:
@@ -152,21 +211,25 @@ def supplement_address_evidence(
                     target = out_dir / detail.screenshot
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(source, target)
+            note = f"address evidence supplemented from saved run {run_id}"
             records[candidate.url] = current.model_copy(
                 update={
                     "crypto_addresses": candidate.crypto_addresses,
                     "low_confidence_addresses": candidate.low_confidence_addresses,
                     "address_details": candidate.address_details,
-                    "navigation": candidate.navigation,
-                    "notes": [
-                        *current.notes,
-                        f"address evidence supplemented from saved run {run_id}",
-                    ]
-                    if f"address evidence supplemented from saved run {run_id}" not in current.notes
-                    else current.notes,
+                    "navigation": _redact_navigation(candidate.navigation),
+                    "notes": current.notes if note in current.notes else [*current.notes, note],
                 }
             )
             changed.append(candidate.url)
-    merged = primary.model_copy(update={"results": [records[r.url] for r in primary.results]})
+    # Every published record is redacted here too: `report` copies a run's results.json that may
+    # predate the redaction in `to_record` (site 084, LOG 2026-10-08).
+    published = [
+        records[r.url].model_copy(
+            update={"navigation": _redact_navigation(records[r.url].navigation)}
+        )
+        for r in primary.results
+    ]
+    merged = primary.model_copy(update={"results": published})
     primary_path.write_text(merged.model_dump_json(indent=2))
-    return changed
+    return changed, conflicts

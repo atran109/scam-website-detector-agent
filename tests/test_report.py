@@ -1,5 +1,6 @@
 """Tests for report.writer and the cross-site sibling pass (no network)."""
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from scamhunter.models import (
 from scamhunter.pipeline import apply_sibling_signals
 from scamhunter.report.writer import (
     primary_sighting,
+    redact_ip,
     supplement_address_evidence,
     to_record,
     write_results,
@@ -153,13 +155,54 @@ def test_saved_run_can_supplement_richer_address_evidence(tmp_path: Path) -> Non
     published = output_dir / "results.json"
     published.write_text(primary_path.read_text())
 
-    changed = supplement_address_evidence(published, [("pilot", supplement_dir)], output_dir)
+    changed, conflicts = supplement_address_evidence(
+        published, [("pilot", supplement_dir)], output_dir
+    )
 
     parsed = ResultsFile.model_validate_json(published.read_text())
-    assert changed == ["https://x.test"]
+    assert changed == ["https://x.test"] and conflicts == []
     assert parsed.results[0].classification == primary.classification.verdict
     assert parsed.results[0].crypto_addresses == [TRON, second.address]
     assert parsed.results[0].notes == ["address evidence supplemented from saved run pilot"]
+
+
+def test_saved_run_with_a_different_address_set_is_not_merged(tmp_path: Path) -> None:
+    """Per-account addresses: a rerun that shows new addresses but not the published one must
+    not replace it (LOG 2026-10-08)."""
+    primary_dir, supplement_dir, output_dir = (tmp_path / d for d in ("p", "s", "o"))
+    primary = result(
+        "001", "x.test", SiteStatus.LIVE, live_scam(), [address(DiscoveryStage.LANDING)]
+    )
+    other = [
+        address(DiscoveryStage.DEPOSIT_PAGE).model_copy(update={"address": a, "normalized": a})
+        for a in ("TUEZSdKsoDHQMeZwihtdoBiN46zxhGWYdH", "TJCnKsPa7y5okkXvQAidZBzqx3QyQ6sxMW")
+    ]
+    write_results([primary], "primary", tmp_path, primary_dir, "test")
+    write_results([primary.model_copy(update={"addresses": other})], "rerun", tmp_path,
+                  supplement_dir, "test")  # fmt: skip
+    output_dir.mkdir()
+    published = output_dir / "results.json"
+    published.write_text((primary_dir / "results.json").read_text())
+
+    changed, conflicts = supplement_address_evidence(
+        published, [("rerun", supplement_dir)], output_dir
+    )
+
+    parsed = ResultsFile.model_validate_json(published.read_text()).results[0]
+    assert changed == [] and conflicts == ["https://x.test"]
+    assert parsed.crypto_addresses == [TRON]
+    assert "not merged" in parsed.notes[-1]
+
+
+def test_visitor_ip_in_recorded_urls_is_redacted() -> None:
+    url = "https://recaptcha.cloud/?template=cpg&server=198.51.100.7&ip=203.0.113.9&real_ip=&x=1"
+    assert redact_ip(url) == (
+        "https://recaptcha.cloud/?template=cpg&server=198.51.100.7&ip=<redacted>&real_ip=&x=1"
+    )
+    assert (
+        redact_ip("https://a.test/?client_ip=203.0.113.9") == "https://a.test/?client_ip=<redacted>"
+    )
+    assert redact_ip("https://a.test/zip=12345") == "https://a.test/zip=12345"
 
 
 def test_sibling_of_live_scam_leans_scam() -> None:
@@ -175,3 +218,28 @@ def test_sibling_of_live_scam_leans_scam() -> None:
     assert out[1].classification.evidence_source == EvidenceSource.SIGNALS_ONLY
     assert any(s.name == "sibling_of_scam:sebca.art" for s in out[1].classification.signals)
     assert out[2].classification.verdict == Verdict.NOT_SCAM
+
+
+def test_publish_redacts_an_older_results_file(tmp_path: Path) -> None:
+    """`report` copies a run's results.json, which may predate redaction: the publish step
+    redacts every record (LOG 2026-10-08)."""
+    out = tmp_path / "out"
+    path = write_results(
+        [result("001", "x.test", SiteStatus.LIVE, live_scam())], "r", tmp_path, out, "test"
+    )
+    data = json.loads(path.read_text())
+    data["results"][0]["navigation"] = {
+        "registered": False,
+        "reached_deposit": False,
+        "steps": 1,
+        "stop_reason": "blocked",
+        "blocked_at": "other",
+        "linked_domains": ["https://r.test/?ip=203.0.113.9&u=/login"],
+        "hops": [],
+    }
+    path.write_text(json.dumps(data))
+
+    supplement_address_evidence(path, [], out)
+
+    nav = ResultsFile.model_validate_json(path.read_text()).results[0].navigation
+    assert nav is not None and nav.linked_domains == ["https://r.test/?ip=<redacted>&u=/login"]

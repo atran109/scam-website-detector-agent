@@ -201,8 +201,10 @@ The last command documents one final-run limitation: the final pass captured two
 Publishing selects the richer saved address evidence but preserves the final run's classification;
 it does not hand-edit JSON or revisit the site. The one later edit to the published file is a
 privacy redaction: site 084's recorded off-site URLs carried the visitor IP the site saw, now
-`ip=<redacted>`. Rerunning `make report` would restore it from `runs/`, so reapply the redaction
-after any republish.
+`ip=<redacted>`. The report step now redacts any IP-valued `…ip=` query parameter itself, and
+`scripts/validate_run.py` fails if one is published. A saved run is merged into a record only if
+its addresses include every address already published (a superset); otherwise the record keeps
+its addresses and gets a "not merged" note.
 
 ## Output example
 
