@@ -14,7 +14,7 @@ The final run (`m6-final-20261007`) completed all 160 records with no partial or
 |---|---:|
 | Scam / not scam | 77 / 83 (live content 34 / 11) |
 | Live / non-live at final triage | 43 / 117 |
-| Primary address findings | 19 (17 unique) on 8 sites |
+| Primary address findings | 22 (20 unique) on 8 sites |
 | Low-confidence findings | 320 (319 unique) on 2 sites |
 | Navigation attempted / deposit page reached | 39 / 7 |
 | Hand-label accuracy | 96% (24/25) |
@@ -61,12 +61,20 @@ precision, 80% recall) and contain all three negatives and the one miss; the 17 
 assistant from saved screenshots are all scams and all match the pipeline (17/17). Those 17 are
 not independent of the system they evaluate, so the 8-label figures are the honest ones.
 
-**Provenance.** One published record merges two saved runs. Site 012 (`bradfordtradeins.com`)
-keeps the final run's classification, but its addresses and `navigation` summary come from pilot
-run `pilot-20261007b`. The final run hit its 180 s navigation limit after BTC and EVM; the pilot,
-at 300 s, also reached the TRON address. The record's `notes` say so. No other record is merged:
-a targeted rerun of 057, 061, 067 and 087 at 300 s (`nav-rerun-20261008`, $0.45) found no new
-addresses, and a saved run is merged only when it adds addresses to the published set.
+**Provenance.** Three published records merge two saved runs. Each keeps the final run's
+classification, and its addresses and `navigation` summary come from a later run at 300 s,
+because the final run hit its 180 s navigation limit on the deposit page. Each record's `notes`
+name the source run.
+
+| Site | Source run | Final run found | Merged record |
+|---|---|---|---|
+| 012 `bradfordtradeins.com` | `pilot-20261007b` | BTC, EVM | + TRON |
+| 032 `elite-crown.com` | `nav-rerun-20261008` | BTC, TRON | + EVM |
+| 109 `windrushs.co` | `nav-rerun-20261008` | BTC, EVM | + TRON, + a second EVM |
+
+A saved run is merged only if its addresses include every address already published (a new
+account could be given different, per-account addresses). The same rerun also covered 057, 061,
+067 and 087 and found nothing new, so those records are unchanged. The rerun cost $0.90 in total.
 
 The accepted full run and crash recovery cost approximately $4.12. Each cached rescore, including
 the one that applied the dead-site rule, cost $0.00; preserved per-site accounting totals 2,724,575 input and 87,888 output tokens. The local
@@ -261,7 +269,7 @@ Every input URL appears once and in input order. Fields omitted here are present
   320 values; keeping them separate protects primary-address precision.
 
 No raw cookies, browser storage state, or secrets are published. The final artifact scan found no
-API/private-key patterns. All 339 published address details passed their format validator and
+API/private-key patterns. All 342 published address details passed their format validator and
 blocklist check and have an existing screenshot. The final egress review found no allowed request
 to a private/risky destination or non-web port. Quality details are recorded in `docs/LOG.md`.
 

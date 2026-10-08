@@ -6269,7 +6269,8 @@
       ],
       "crypto_addresses": [
         "19qD2cqE3D6zVv9ZtDAJX59RUpcZ3PniJB",
-        "TEXjjWnSanEHtUjcUCfLjqQszBdDLukV2Q"
+        "TEXjjWnSanEHtUjcUCfLjqQszBdDLukV2Q",
+        "0xe92bfe0d89bc135d5a92a0254ddb68e7ddb0f377"
       ],
       "low_confidence_addresses": [],
       "address_details": [
@@ -6314,20 +6315,51 @@
           "stage": "deposit_page",
           "screenshot": "screenshots/032_db6e0eb70ef2.png",
           "sighting_count": 1
+        },
+        {
+          "address": "0xe92bfe0d89bc135d5a92a0254ddb68e7ddb0f377",
+          "normalized": "0xe92BFE0D89Bc135D5A92a0254dDb68e7DdB0f377",
+          "tier": "primary",
+          "format": "evm",
+          "labels": [
+            {
+              "asset": "BNB",
+              "network": "bsc",
+              "confidence": 0.4,
+              "evidence": "BNB mentioned elsewhere on the page"
+            },
+            {
+              "asset": "ETH",
+              "network": "ethereum",
+              "confidence": 0.4,
+              "evidence": "ETH mentioned elsewhere on the page"
+            },
+            {
+              "asset": "USDT",
+              "network": "ethereum",
+              "confidence": 0.4,
+              "evidence": "USDT mentioned elsewhere on the page"
+            }
+          ],
+          "source": "dom_text",
+          "stage": "deposit_page",
+          "screenshot": "screenshots/032_4b998df004bd.png",
+          "sighting_count": 1
         }
       ],
       "app_download_urls": [],
       "navigation": {
         "registered": true,
         "reached_deposit": true,
-        "steps": 23,
-        "stop_reason": "budget_time",
+        "steps": 27,
+        "stop_reason": "goal_reached",
         "blocked_at": null,
         "linked_domains": [],
         "hops": []
       },
       "notes": [
-        "first judgment: scam, p=0.90"
+        "first judgment: scam, p=0.90",
+        "address evidence supplemented from saved run nav-rerun-20261008"
       ]
     },
     {
@@ -9415,7 +9447,9 @@
       ],
       "crypto_addresses": [
         "14cSXXWLUSHQhYVUwYe16r8hou3fGytcwR",
-        "0xdAfb451b589090083245083731C1AEbc38565d4B"
+        "TTgKQEVqQQWRNmkzhQ5Mu35JV7dAPN7GCk",
+        "0xdAfb451b589090083245083731C1AEbc38565d4B",
+        "0x7Dcb51F13C049DD0da4a1219431C821252601110"
       ],
       "low_confidence_addresses": [],
       "address_details": [
@@ -9438,6 +9472,24 @@
           "sighting_count": 1
         },
         {
+          "address": "TTgKQEVqQQWRNmkzhQ5Mu35JV7dAPN7GCk",
+          "normalized": "TTgKQEVqQQWRNmkzhQ5Mu35JV7dAPN7GCk",
+          "tier": "primary",
+          "format": "tron",
+          "labels": [
+            {
+              "asset": "UNKNOWN",
+              "network": "tron",
+              "confidence": 0.0,
+              "evidence": "no asset context"
+            }
+          ],
+          "source": "dom_text",
+          "stage": "deposit_page",
+          "screenshot": "screenshots/109_162ba2fc06d8.png",
+          "sighting_count": 2
+        },
+        {
           "address": "0xdAfb451b589090083245083731C1AEbc38565d4B",
           "normalized": "0xdAfb451b589090083245083731C1AEbc38565d4B",
           "tier": "primary",
@@ -9454,20 +9506,39 @@
           "stage": "deposit_page",
           "screenshot": "screenshots/109_08df9dbcd586.png",
           "sighting_count": 1
+        },
+        {
+          "address": "0x7Dcb51F13C049DD0da4a1219431C821252601110",
+          "normalized": "0x7Dcb51F13C049DD0da4a1219431C821252601110",
+          "tier": "primary",
+          "format": "evm",
+          "labels": [
+            {
+              "asset": "UNKNOWN",
+              "network": "unknown",
+              "confidence": 0.0,
+              "evidence": "no asset context"
+            }
+          ],
+          "source": "dom_text",
+          "stage": "deposit_page",
+          "screenshot": "screenshots/109_4e564464fbd0.png",
+          "sighting_count": 1
         }
       ],
       "app_download_urls": [],
       "navigation": {
         "registered": true,
         "reached_deposit": true,
-        "steps": 25,
-        "stop_reason": "budget_time",
+        "steps": 37,
+        "stop_reason": "goal_reached",
         "blocked_at": null,
         "linked_domains": [],
         "hops": []
       },
       "notes": [
-        "first judgment: scam, p=0.87"
+        "first judgment: scam, p=0.87",
+        "address evidence supplemented from saved run nav-rerun-20261008"
       ]
     },
     {
