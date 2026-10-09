@@ -1,8 +1,8 @@
-# Crypto Scam Detection Agent
+# Ferret - Crypto Scam Detection Agent
 
 ## Summary
 
-I built a sandboxed browser agent that takes 160 suspected scam URLs, decides for each one
+Furret is a sandboxed browser agent that takes 160 suspected scam URLs, decides for each one
 whether it is a scam, and pulls out the crypto deposit addresses it shows, including addresses
 that appear only after registering, logging in, verifying an email and opening a deposit page.
 Plain, tested code does the checking, saving, address extraction and output; a Claude model does
