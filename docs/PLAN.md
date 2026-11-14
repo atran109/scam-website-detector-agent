@@ -1,13 +1,13 @@
-# Plan: Crypto Scam Detection Agent (TRM Labs challenge)
+# Plan: Crypto Scam Detection Agent
 
 > Written at the start, expected to change. When it changes, add a dated entry to `LOG.md` saying what changed and why. Design details live in `DESIGN.md`.
 
-**Submission:** private GitHub repo shared with `@rraina`
+**Repository:** GitHub
 
 ## Next actions
 
-1. [x] Deadline: none, ASAP (freeze points apply relative to whenever submission is decided)
-2. [x] API key: my own, reimbursed. Set a monthly spend limit in the Anthropic console; keep invoices for reimbursement
+1. [x] Deadline: none, ASAP (freeze points apply relative to whenever release is decided)
+2. [x] API key: my own. Set a monthly spend limit in the Anthropic console
 3. [x] Create the private repo; commit `docs/`, `data/urls.txt`, `CLAUDE.md`, `.gitignore`, `.env.example`
 4. [x] Install Docker Desktop; limit file sharing to the project folder; check Python 3.12
 5. [x] Claude Code session 1 (plan mode first): M1 sandbox, egress proxy, `make selftest`; then the first watched run of triage inside the container
@@ -29,7 +29,7 @@ For each of 160 URLs: classify scam / not scam, and for scams extract every cryp
 - [x] README explains architecture, scam definition, assumptions, alternatives, creative choices, limitations, next steps
 - [x] Documented run command works from a clean checkout
 - [x] No real secrets (API keys, cookies from real accounts) in the repo or artifacts; synthetic credentials kept per site for reproducibility
-- [ ] Repository is private and shared with `@rraina`
+- [ ] Repository published
 
 ## Approach (one paragraph)
 
@@ -52,7 +52,7 @@ Adjust the hours to the real schedule.
 | M4 | Classification + confidence | 3 | Rubric tuned on hand labels; explanations defensible |
 | M5 | Full hardening | 1.5 | Remaining layers in `DESIGN.md` §5.6 in place and checked |
 | M6 | Batch run + quality checks | 3 | All 160 done; quality report written |
-| M7 | Docs + submission | 3 | Clean-checkout run works; repo shared |
+| M7 | Docs + release | 3 | Clean-checkout run works; repo shared |
 | | Buffer | 2-3 | Something will break |
 
 ## Milestones
@@ -156,7 +156,7 @@ Adjust the hours to the real schedule.
 - [x] Keep Playwright traces for scam sites and failures
 - [x] Short quality report (`runs/<ts>/summary.json` + notes)
 
-### M7. Documentation and submission
+### M7. Documentation and release
 
 - [x] Setup and run instructions tested from a clean checkout
 - [x] Architecture diagram (from `DESIGN.md` §5.1)
@@ -168,7 +168,7 @@ Adjust the hours to the real schedule.
 - [x] What more time would improve
 - [x] Sample output and troubleshooting notes
 - [x] Repo contents: `README.md`, `docs/` (DESIGN, PLAN, LOG), `src/`, `tests/`, `data/urls.txt`, `output/results.json`, sample evidence/traces, `eval/labels.csv`, `.env.example`; no `.env`, no raw cookies
-- [ ] Repo private; access shared with `@rraina`
+- [ ] Repository published
 
 ## Risk register
 
@@ -187,7 +187,7 @@ Adjust the hours to the real schedule.
 | **False positives** | Require multiple signals unless a strong one fires; keep evidence for review |
 | **False negatives** | Navigate scam/uncertain sites even when an address is already visible; network + QR sources |
 | **Invalid or irrelevant addresses** | Checksums, contract/example blocklist, cross-site constant filter |
-| **Output not parsed correctly by the grader** | `is_scam` boolean plus `crypto_addresses` as plain strings; JSON-schema validation; sample output in README |
+| **Output not parsed correctly by downstream scripts** | `is_scam` boolean plus `crypto_addresses` as plain strings; JSON-schema validation; sample output in README |
 | **README squeezed at the end** | Feature freeze and code freeze (see Schedule guardrails); README drafted from `LOG.md` during the last 3h |
 | **Runtime/cost overruns** | 10-20 URL pilot first; step/time budgets; token tracking; LLM response cache |
 | **Unreproducible results** | Pinned dependencies, logged config hash, temperature 0, cached LLM responses, traces |
@@ -209,20 +209,20 @@ Adjust the hours to the real schedule.
 | Classification | Tiered signals + LLM judge with quoted evidence, fused into confidence | Balances repeatability and coverage | Manual review shows systematic errors |
 | Failure handling | Structured record, then continue | Preserves one result per URL | Failure rate is unusually high |
 | Concurrency | Low, bounded (about 6) | Reduces risk and rate limits | Runtime exceeds budget |
-| Output contract | `is_scam` + `crypto_addresses` (primary) + `low_confidence_addresses` + `address_details` | Easy for scripts and humans to read | Grader format is clarified |
+| Output contract | `is_scam` + `crypto_addresses` (primary) + `low_confidence_addresses` + `address_details` | Easy for scripts and humans to read | A consumer needs a different format |
 | Address policy | Report exactly as seen plus `normalized`; low-confidence kept apart | Exact-string comparison against ground truth; protects precision | — |
 | Verdict bias | `scam_threshold` 0.45 | Missing a scam costs more than a false flag for this task | Hand-label results show too many false positives |
 | Models | Strong model for navigation/judging; Haiku-class helper | Cost and quality | First-10-site measurement |
 | Email verification | One disposable provider; else record `blocked_at` | Bounded effort | Many sites blocked by it |
 | Give-up rule | 4 consecutive failed steps | Bounds time and cost per site | Pilot shows premature give-ups |
-| Freeze points | See Schedule guardrails | Protect docs and submission | — |
+| Freeze points | See Schedule guardrails | Protect docs and release | — |
 | Dead-site verdict | Wayback snapshot → normal classifier (shrunk); else domain/sibling/warning signals → lean scam; else `not_scam`, low confidence | 104/160 not live; labels likely from a scam feed | Hand labels on dead sites |
 
 ## Schedule guardrails
 
 - Feature freeze: deadline minus 6h. After that, only fixes, the batch run and evaluation
 - Code freeze: deadline minus 3h. README is finished from `LOG.md` in the last 3h
-- Clean-checkout test: deadline minus 1h; then share the repo with `@rraina`
+- Clean-checkout test: deadline minus 1h; then publish the repo
 
 ## Known facts about the list (static analysis, no network)
 

@@ -1,7 +1,7 @@
 [project]
 name = "scamhunter"
 version = "0.1.0"
-description = "Crypto scam detection agent (TRM Labs take-home)"
+description = "Crypto scam detection agent: classifies suspected scam sites and extracts their crypto deposit addresses"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 # Pinned exactly for reproducibility. Add each dependency in the milestone that first uses it.

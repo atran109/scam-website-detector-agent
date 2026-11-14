@@ -431,7 +431,7 @@ class RunSummary(BaseModel):
 
 
 # ---------- Output file (§3.4) ----------
-# Flattened view of SiteResult for graders. Strict: unknown fields are rejected.
+# Flattened view of SiteResult for consumers of the output. Strict: unknown fields are rejected.
 
 
 class OutputModel(BaseModel):

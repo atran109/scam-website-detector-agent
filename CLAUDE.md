@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Crypto scam detection agent for the TRM Labs take-home. For each URL in `data/urls.txt`, classify scam / not_scam and extract crypto addresses (including ones behind registration/login), writing `output/results.json`.
+Crypto scam detection agent. For each URL in `data/urls.txt`, classify scam / not_scam and extract crypto addresses (including ones behind registration/login), writing `output/results.json`.
 
 ## Source of truth
 - `docs/DESIGN.md`: architecture, repo layout (§2), data models and output contract (§3), assumptions (§4), security (§5.6), policies (§7). Follow it; if code needs to differ, say so and propose a DESIGN edit first.

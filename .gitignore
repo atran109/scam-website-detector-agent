@@ -17,5 +17,5 @@ dist/
 # OS
 .DS_Store
 
-# Personal review notes (not part of the submission)
+# Personal review notes (not part of the repo)
 docs/STUDY_GUIDE.md

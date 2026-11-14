@@ -1,9 +1,10 @@
 """App-download targets a page points at: Android packages, iOS profiles and apps, store links.
 
-Evidence for TRM, found in the page's HTML, scripts and network responses and never fetched
-(downloads stay blocked). Pilot site 117 is an app-download landing page whose `config.js` says
-`apkName = 'BTCC.apk'` and `iPhoneName = 'BTCC.mobileconfig'`: the deposit flow lives inside the
-app, and the file name and host are the only web-visible traces (LOG 2026-10-07)."""
+Evidence for investigators, found in the page's HTML, scripts and network responses and never
+fetched (downloads stay blocked). Pilot site 117 is an app-download landing page whose
+`config.js` says `apkName = 'BTCC.apk'` and `iPhoneName = 'BTCC.mobileconfig'`: the deposit flow
+lives inside the app, and the file name and host are the only web-visible traces
+(LOG 2026-10-07)."""
 
 import re
 from urllib.parse import urljoin

@@ -73,7 +73,7 @@ Backfilled from planning conversation.
 - Keep Playwright `trace.zip` for scam sites and failures: timeline, DOM snapshots, screenshots, network with bodies, viewable locally.
 
 ## 2026-10-04 · H+? · DECISION: plan merged with my own draft plan
-- Kept from my draft: definition-of-done items (one record per URL, clean-checkout run, no secrets in artifacts, private repo shared with `@rraina`), quality checks, risk register, decision-log table, internal uncertain state.
+- Kept from my draft: definition-of-done items (one record per URL, clean-checkout run, no secrets in artifacts, private repo), quality checks, risk register, decision-log table, internal uncertain state.
 - Added: dedicated navigation milestone, risk-first order (baseline sandbox → thin end-to-end → navigation → full hardening before the batch), network + QR address sources, screenshots at discovery, hand-labeled accuracy numbers, `processing_status` separate from site `status`, prompt-injection and private-network risks, cut list.
 
 ## 2026-10-04 · H+? · DECISION: crawler runs in hardened Docker on my personal Mac
@@ -113,9 +113,9 @@ Backfilled from planning conversation.
 - Repo ships docs, src, tests, urls, results, sample evidence, eval labels, `.env.example`; never `.env` or real cookies.
 - Feature freeze at deadline −6h, code freeze at −3h, clean-checkout test at −1h. README is written from this log.
 
-## 2026-10-04 · H+? · FINDING: deadline flexible; API key self-funded, reimbursed
+## 2026-10-04 · H+? · FINDING: deadline flexible; API key self-funded
 - Still setting a self-imposed target date so the freeze points in PLAN have something to key off.
-- Spend limit set in the console; invoices kept for reimbursement.
+- Spend limit set in the console.
 
 ## 2026-10-04 18:11 · H+? · DECISION: repo skeleton (M0) and DESIGN/PLAN fixes from review
 Skeleton built per DESIGN §2.1; Dockerfile, docker-compose.yml and squid.conf deferred to M1. Only pydantic (plus pytest and ruff for dev) pinned; other deps get pinned in the milestone that first uses them. Decisions from reviewing DESIGN/PLAN:
@@ -279,7 +279,7 @@ Tests use the saved pilot texts (copied to `tests/fixtures/pilot_texts/`, since 
 ## 2026-10-05 04:20 · H+? · DECISION: drop addresses the page labels as a contract (fix 3 of 4)
 #027's low-confidence `0xe90D…` is introduced on the page as "Contract Address: 0xe90D…" (the project's own token contract; the wallet `0xD499…` sits under "Wallet Address"). Extraction now drops an address when the text right before it (own line, or the nearest line above when the address starts its line) is a contract label: "Contract Address:", "Token address:", "Smart/NFT/presale contract (BEP-20):", "合约地址". Layouts tested: same line, label on the line above, parenthetical, Chinese.
 - **Decided once per address across sources.** First version only dropped the visible-text occurrence; the rescore still listed `0xe90D…` as low-confidence because the same string appears in a "Copy Address" button attribute with no label next to it. Extraction is now two-pass: pass 1 collects every candidate and marks contracts (label or contract-key); pass 2 skips marked addresses in all sources. Reported once in the "ignored N token-contract address(es)" note.
-- **Exception I added:** a label line that tells visitors to send funds there ("Send ETH to the presale contract: 0x…", "invest … to") is kept. A presale/payment contract can be the scammer's collection address, which is exactly what TRM wants. Easy to remove if you'd rather drop every "contract" label.
+- **Exception I added:** a label line that tells visitors to send funds there ("Send ETH to the presale contract: 0x…", "invest … to") is kept. A presale/payment contract can be the scammer's collection address, which is exactly what an investigation needs. Easy to remove if you'd rather drop every "contract" label.
 - Not covered: a contract that the page never labels as such (e.g. only named in a prose sentence), and a snapshot-to-snapshot case (labelled in one snapshot, bare in another); with one snapshot per site today this doesn't occur.
 - **Result (rescore, no visits):** #027 reports only `0xD499…` (primary); low-confidence list is empty. #100 unchanged (2 primary approval wallets).
 
@@ -352,7 +352,7 @@ Step A built `--mock` (loopback-only browser). First version: a Playwright route
 - **Mock exchange** (`tests/fixtures/mock_exchange/`, stdlib server + one HTML file): register → login → Assets (Recharge/Withdraw/Transfer/Finance/Loan/Service) → deposit with coin tabs and network chips → address + QR. 10 variants: `normal`, `div_ui` (plain `<div onclick>` buttons, unlabeled inputs), `invite_required` (code shown nowhere), `invite_visible` (printed in the footer), `sms_gate`, `captcha`, `email_verify` (mock inbox endpoint standing in for mail.tm), `wallet_gate` (forced modal, no close), `amount_first` (address only after the stated minimum), `injection` (hostile "notice to AI agents" text + off-domain link). Traps in every variant: Withdraw, Confirm payment, "I have paid", Upload receipt, Connect Wallet; decoys: token contracts in the coin-list API and a labelled contract in the footer. Six distinct, validator-valid addresses per account (USDT/USDC on TRC20 and ERC20, BTC, ETH); different accounts get different addresses. Every request is logged; calls to money-moving endpoints land in `exchange.forbidden` so tests can assert nothing was paid, signed or withdrawn.
 - **Tests:** 31 server tests (addresses valid and non-blocklisted, per-account, gates, email verification, amount minimum, forbidden endpoints, QR decodes, every variant serves); 26 loopback-guard cases; 4 browser tests in the offline container (register → recharge → all six assets in the `normal` and `div_ui` UIs, forbidden list empty; wallet gate blocks the UI; the injection page's off-domain link is stopped). Suite 256 passed (unit) + 4 (browser). **Selftest 41/41** (was 34): `--mock` refuses 9 non-loopback URLs and accepts loopback, control, loopback reachable, 8 navigations blocked, redirect blocked, `fetch()` blocked.
 - **Small fixes on the way:** the stdlib `HTTPServer.server_bind` calls `getfqdn()`, a reverse-DNS lookup that stalled 35 s on this Mac, so the mock server skips it; `launch_browser` no longer accepts `proxy=None` (the proxy-less path is `launch_mock_browser`, loopback only).
-- **Repo visibility:** `github.com/atran109/scam-website-detector-agent` answered an anonymous API request with 200 and `private: false`, i.e. it is PUBLIC, although PLAN says private and shared only with `@rraina`. It holds `data/urls.txt`, the design docs and saved scam-page text fixtures (no secrets: `.env` and `runs/` are gitignored). Not pushing further until the user decides; "push after each gate" was given assuming a private repo.
+- **Repo visibility:** `github.com/atran109/scam-website-detector-agent` answered an anonymous API request with 200 and `private: false`, i.e. it is PUBLIC, although PLAN says private. It holds `data/urls.txt`, the design docs and saved scam-page text fixtures (no secrets: `.env` and `runs/` are gitignored). Not pushing further until the user decides; "push after each gate" was given assuming a private repo.
 
 ## 2026-10-05 09:00 · H+? · FINDING: brand-sweep candidate list (AWAITING CONFIRMATION; nothing added to `brands.yaml`)
 The candidate list from the sweep described above, so it is on record. Candidate brands come from general knowledge, not from the URL list; as noted, parts of the existing list were built while reviewing it.
@@ -587,7 +587,7 @@ Tokens per solvable run: about 69k–96k in (mostly cache reads), 1.6k–2.6k ou
 
 ## 2026-10-06 21:15 · H+? · DECISION [arch] (user): `linked_domains` output field
 - Extends the cross-domain link rule: links and `goto` may go anywhere on the same registrable domain (eTLD+1, subdomains included). Every refused cross-domain target URL is recorded in the new `linked_domains` field (`NavigationTrace` and the output's `navigation` summary; DESIGN §3.3/§3.4): refused link clicks, refused `goto`s, and script navigations that left the site and were undone. A `file://` or other non-web `goto` is refused for its scheme and is not listed.
-- Why: where a scam site sends visitors (Telegram support, sibling domains, payment pages) is evidence for TRM, and the agent must not follow it.
+- Why: where a scam site sends visitors (Telegram support, sibling domains, payment pages) is evidence for investigators, and the agent must not follow it.
 - Rejected: storing only the domain (the full URL keeps paths such as invite or payment links); the name stays `linked_domains` as requested.
 
 ## 2026-10-06 21:15 · H+? · DECISION [arch][creative]: per-step history, "gates seen so far", page-cycle detection
@@ -646,7 +646,7 @@ Method (`eval/live_tally.py`, visible text of the first, landing snapshot of `ru
 - Caveats: the bucketing is mechanical (words in visible text), not a judgment that a deposit flow exists; the landing snapshot misses modals that appear later; the pilot ran on desktop with at most one mobile retry. To cover the other 43 live sites, capture needs a landing snapshot (one visit per site, inside the sandbox, after selftest), which the full run's capture stage already does.
 
 ## 2026-10-06 21:12 · H+? · RESULT [arch]: step E work pushed
-- `origin/main` is at `d9c9692` (the first push of M3: 9 commits from `fd5954c`). Before pushing, the anonymous GitHub API returned 404 for the repo (private; it was public on 2026-10-05) and a scan of tracked files found no `sk-ant-` keys, no `.env` and nothing under `runs/`. Whether `@rraina` has access was not checked.
+- `origin/main` is at `d9c9692` (the first push of M3: 9 commits from `fd5954c`). Before pushing, the anonymous GitHub API returned 404 for the repo (private; it was public on 2026-10-05) and a scan of tracked files found no `sk-ant-` keys, no `.env` and nothing under `runs/`.
 
 ## 2026-10-06 21:40 · H+? · DECISION [arch] (user): mock wallet deferred until the full live-site tally; extra invite_required runs folded into the next mock regression
 - Supersedes the open question of the 21:06 entry on whether the mock wallet is built before the pilot: it waits for the tally on all live sites (`eval/live_tally.py` on full data, which needs a capture pass first).
@@ -694,7 +694,7 @@ Full selftest 41/41 first. 56 live sites (per triage-1, 2026-10-04) captured: 56
 - Supersedes the 22:30 "deferred pending the user's call" and every earlier "deferred, not cut" entry. Why: only 1 of 56 live sites (2%) is wallet-gated on the landing-page tally (055). Such sites end `blocked_at: wallet_required`, which the output already supports. README "With more time" carries it, with the caveat that the tally cannot see modals that appear after load. Rejected: building it for the pilot (cost and a new attack surface in `window.ethereum` for 1 site).
 
 ## 2026-10-06 22:50 · H+? · DECISION [creative][future] (user): the 9-site shared shop template goes in the README
-- Sites 125, 128–130, 141–142, 150–152 share one Chinese-language shop template (by visible wording, operator not verified). README: "With more time" (cluster by template/HTML structure; operator-level leads for TRM) and "Creative" gets the capture-only mode. Why: it is a finding about the data that a reviewer would otherwise miss, and it shows the 27 registration-gated count is fewer independent designs.
+- Sites 125, 128–130, 141–142, 150–152 share one Chinese-language shop template (by visible wording, operator not verified). README: "With more time" (cluster by template/HTML structure; operator-level leads for investigators) and "Creative" gets the capture-only mode. Why: it is a finding about the data that a reviewer would otherwise miss, and it shows the 27 registration-gated count is fewer independent designs.
 
 ## 2026-10-06 22:50 · H+? · DECISION [arch] + RESULT: `RunContext` keyword-only; browser test that capture-only never clicks
 - `@dataclass(kw_only=True)`: the positional-argument bug of 22:10 cannot recur. Call sites and one unit test updated.
@@ -751,7 +751,7 @@ Full selftest 41/41 first. 56 live sites (per triage-1, 2026-10-04) captured: 56
 - Effect on saved pages: 031 goes from 134 primary to 0 (all 280 low-confidence); 078 unchanged (all low-confidence); the pilot-5 positives stay primary (100: 2 primary from `approve_address`-style keys; 027: 1 from visible text). `make check`: no existing test needed a change.
 - Tests (`tests/test_extractor.py`, fixture `tests/fixtures/pages/031_launchpad_response.json` = five real cards of 031's API response): generic keys stay low-confidence; `depositAddress`, `recharge_address`, `receiveWallet`, `payTo`, `approve_address` are primary. Both fail on the old regex (checked).
 - Rejected: dropping only `addr|address` and keeping `wallet` (a bare `wallet` key can hold a user's own wallet); down-weighting by count of addresses per response (a heuristic on top of a wrong rule).
-- Risk: a real deposit address under an unexpected key name (for example `usdtTrc20` or `walletAddress` on a kit) now stays low-confidence until the agent reaches a deposit page (stage DEPOSIT_PAGE promotes any sighting) or the allowlist grows. Prefers precision here because a wrong primary address is worse for TRM than a late one.
+- Risk: a real deposit address under an unexpected key name (for example `usdtTrc20` or `walletAddress` on a kit) now stays low-confidence until the agent reaches a deposit page (stage DEPOSIT_PAGE promotes any sighting) or the allowlist grows. Prefers precision here because a wrong primary address is worse for an investigation than a late one.
 
 ## 2026-10-07 01:10 · H+? · DECISION [arch] (user): `wallet_mock: false`; prompt confirmed
 - `config/settings.yaml` and the DESIGN §3.5 block (kept equal by `test_settings_match_design`, which caught the one-sided edit) now say `wallet_mock: false`. The flag was never read by the policy or prompt (`Policy.mock_wallet_active` defaults to False and the real-site path hard-codes False), so this is documentation of the v1 state. DESIGN §5.5 and the wallet-mock paragraph say it is not built.
@@ -1238,3 +1238,10 @@ On the 43 effective live sites of `capture-2` (classified from saved evidence, 1
 - **README (user's structure and headings):** title "Crypto Scam Detection Agent" (dropping "Project BloodHound", which collides with a well-known security tool); headline table led by the user's 8 labels (TP 4, FP 0, FN 1, TN 3; 100% / 80%), with the 25-label figures second and the AI-written-labels caveat in the same row; F1 dropped. The four required sections (system design, unique or creative, alternatives, more time) are written in first person, 245 to 305 words each, with an evidence comment after each paragraph. Jargon replaced (for example "pulled toward 50/50 because archived evidence is weaker"; "a later run is used only if it found every address the first run did, plus more"). "Setup and commands", "Output example" and "Troubleshooting" are kept as three headings.
 - **Reasons recorded here for the first time (the user's own, 2026-10-08):** Playwright MCP was not evaluated during the build; the reason given against it is that it exposes broad browser tools to a model inside a client that can also run shell commands. Blocking withdraw and "I have paid" also limits how much page text can steer the agent (in addition to the 2026-10-06 reasons).
 - `make check`: 656 passed. `scripts/validate_run.py`: OK. Committed, not pushed (user's instruction).
+
+## 2026-11-14 17:15 · H+? · DECISION [arch] (user): standalone project; origin mentions reworded in place
+- The project continues as a standalone personal project (Ferret). The user chose to keep this repository, its git history, `data/urls.txt`, `output/`, labels and fixtures unchanged, and to reword only the mentions of where the project came from into the project's own goals.
+- **One-time exception to "never edit old entries":** nine old LOG entries were reworded (who the evidence is for, repository sharing, how the API key is paid for). Facts, numbers and decisions were not changed. DESIGN §1 is renamed "Requirements" and its priorities are stated as core / important / nice to have; PLAN, README, CLAUDE.md, `pyproject.toml`, `.gitignore` and two code comments were reworded the same way.
+- Rejected: a fresh repository with new history (cleanest, but drops the URL list and results the project still uses); rewriting git history (the user chose to keep it, so old commits still show the original wording).
+- A full backup bundle of the history before this change is kept locally, outside the repository.
+- Next steps are drafted in `docs/ROADMAP.md` (not yet approved).

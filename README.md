@@ -277,7 +277,7 @@ src/scamhunter/agent/prompts.py (Chinese deposit labels) -->
 Requirements: GNU Make and Python 3.12; Docker Desktop (running) for anything that uses a browser
 or container. Restrict Docker's file sharing to this project directory if possible.
 
-### No API key, no internet: check the submission
+### No API key, no internet: check the results
 
 ```bash
 git clone <private-repository-url>
@@ -323,7 +323,7 @@ with the same run ID and `--resume`; never reuse a run ID without it. To approve
 submission yourself, add `--confirm-submit` (one site at a time). `--max-seconds 300 --max-steps
 30` matches the pilot's budget; the defaults are 180 and 25.
 
-To republish the submitted file from saved evidence (only where `runs/` exists):
+To republish the results file from saved evidence (only where `runs/` exists):
 
 ```bash
 make rescore RUN=m6-final-20261007

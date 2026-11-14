@@ -2,7 +2,7 @@
 
 Five stages, each building on the last, plus alternatives and policies:
 
-1. [Spec Summarization](#1-spec-summarization): what we must deliver, as action items
+1. [Requirements](#1-requirements): what the system must do, as action items
 2. [Code Structure](#2-code-structure): how the repo is organized
 3. [Data and Ontology](#3-data-and-ontology): the vocabulary, schemas and output format
 4. [Valid Assumptions](#4-valid-assumptions): what we take as given, why, and what happens if we're wrong
@@ -14,17 +14,17 @@ Package name `scamhunter` is a placeholder. Rename freely.
 
 ---
 
-## 1. Spec Summarization
+## 1. Requirements
 
-### 1.1 The task in one paragraph
+### 1.1 The goal in one paragraph
 
 Given 160 URLs, autonomously visit each one inside a sandbox, decide whether it is a scam, and for scams collect every crypto address the site exposes. That includes addresses that only appear after registering, logging in, or opening a deposit page. Output one JSON record per URL with the verdict, addresses, and confidence/reasoning. Ship working code, setup instructions, and a README that explains the design, the alternatives considered, what's novel, and what comes next.
 
 ### 1.2 Action items
 
-Priority: **P0** = required or heavily graded, **P1** = graded at medium weight or strongly implied, **P2** = bonus.
+Priority: **P0** = core, **P1** = important or strongly implied, **P2** = nice to have.
 
-| ID | Action item | Source in spec | Pri | Done when |
+| ID | Action item | Source | Pri | Done when |
 |---|---|---|---|---|
 | R1 | Load the 160 URLs from a file, preserving order and paths (`/wap`, `/h5`) | "Process a provided list of 160 URLs" | P0 | All 160 appear exactly once in the output |
 | R2 | Triage liveness for every URL into a status taxonomy (live, dead, parked, suspended, blocked…) | "Handle edge cases gracefully (inactive sites…)" | P0 | Every record has a `status`; no URL crashes the run |
@@ -42,21 +42,21 @@ Priority: **P0** = required or heavily graded, **P1** = graded at medium weight 
 | R14 | Screenshot each scam site with the address visible | Bonus | P2 | Screenshot path on each address sighting, ideally with the address highlighted |
 | R15 | Confidence score with a documented method | "Optional but encouraged" | P1 | Numeric score plus written formula |
 
-**Implied requirements** (not stated, but they affect the grade):
+**Implied requirements** (not stated, but they matter):
 
 | ID | Action item | Why | Pri |
 |---|---|---|---|
-| I1 | One-command run, resumable after a crash | Graders will try to run it | P1 |
+| I1 | One-command run, resumable after a crash | Anyone checking the results should be able to run it | P1 |
 | I2 | Self-evaluation on a hand-labeled sample | Accuracy is the top criterion and there's no provided ground truth | P1 |
 | I3 | Decision log feeding the README | "Interested in your thought process" | P1 |
 | I4 | Bounded cost and runtime (per-site budgets, token accounting) | A runaway agent across 160 sites is expensive and slow | P1 |
 | I5 | Per-site reasoning for ambiguous cases | "Use your judgment… document your reasoning" | P1 |
-| I6 | Treat site content as hostile input to the LLM (prompt injection) | Security is graded; scam pages are adversarial | P1 |
-| I7 | Output that a script can check without guessing: boolean verdict, flat address list, address strings exactly as shown on the site | TRM may compare strings programmatically; a format mismatch would look like wrong answers | P0 |
+| I6 | Treat site content as hostile input to the LLM (prompt injection) | Security is a core goal; scam pages are adversarial | P1 |
+| I7 | Output that a script can check without guessing: boolean verdict, flat address list, address strings exactly as shown on the site | Downstream tools may compare strings programmatically; a format mismatch would look like a missed address | P0 |
 
-### 1.3 Where each grading criterion is answered
+### 1.3 Quality goals and where each is addressed
 
-| Criterion (weight) | Answered by |
+| Goal (priority) | Addressed by |
 |---|---|
 | Classification accuracy (High) | R2, R4, R15, I2: heuristics + LLM judge, re-classified after navigation |
 | Extraction completeness (High) | R5, R6, R7, R8: multi-source extraction + navigation agent + coin iteration |
@@ -585,7 +585,7 @@ class RunSummary(BaseModel):
     total_tokens_in: int; total_tokens_out: int
 
 # ---------- Output file (§3.4) ----------
-# Flattened view of SiteResult for graders. All output models use extra="forbid".
+# Flattened view of SiteResult for consumers of the output. All output models use extra="forbid".
 class AddressDetail(BaseModel):
     address: str                   # exactly as shown on the site
     normalized: str
@@ -640,7 +640,7 @@ class ResultsFile(BaseModel):     # output/results.json
 
 ### 3.4 Output file (the deliverable)
 
-`output/results.json`: a `meta` block plus one flattened record per URL (`ResultsFile`, §3.3). Flattened from `SiteResult` so a grader can read it without knowing the internals; full traces stay in `runs/`.
+`output/results.json`: a `meta` block plus one flattened record per URL (`ResultsFile`, §3.3). Flattened from `SiteResult` so a reader can use it without knowing the internals; full traces stay in `runs/`.
 
 The example below is illustrative, not a real finding (`TXyz…` is a placeholder, not a valid address). It is validated against the models by `tests/test_models.py`.
 
@@ -722,14 +722,14 @@ The example below is illustrative, not a real finding (`TXyz…` is a placeholde
 
 | Field | Rule | Why |
 |---|---|---|
-| `classification` | `"scam"` or `"not_scam"` | Matches the spec's wording |
+| `classification` | `"scam"` or `"not_scam"` | Matches the requirements' wording |
 | `is_scam` | Boolean, always present | Unambiguous for any script, regardless of how the label strings are compared |
-| `scam_probability` | 0–1 fused score; verdict is `scam` iff `scam_probability >= scam_threshold` (0.45) | One number a grader can re-threshold |
+| `scam_probability` | 0–1 fused score; verdict is `scam` iff `scam_probability >= scam_threshold` (0.45) | One number a consumer can re-threshold |
 | `confidence` | Probability that the stated `classification` is correct: `scam_probability` for scam, `1 - scam_probability` for not_scam | Reads naturally per record; see note below |
 | `evidence_source` | `live`, `wayback`, `signals_only` or `none` (§5.2a) | Shows how much each verdict rests on; dead sites stay visible via `status` |
 | `crypto_addresses` | Flat list of strings: tier **primary** addresses, exactly as shown on the site, **on every record whatever the verdict** (changed 2026-10-07: pilot site 012's three deposit addresses were dropped when its verdict fell to not_scam at p=0.44; an address is a fact about the page, the verdict is a judgment, and a reader can filter by `is_scam`) | Easiest thing to compare against a ground-truth list |
 | `low_confidence_addresses` | Flat list of strings: valid addresses without deposit/payment context | Keeps completeness without polluting the main list |
-| `app_download_urls` | App files and store pages the site's HTML, scripts or network responses point at (`extract/app_downloads.py`; downloads stay blocked). Pilot site 117's deposit flow is inside `BTCC.apk`; the file name and host are the only web-visible trace. A store link alone (031 links the real Phantom wallet) is not evidence of harm; an off-store `.apk` or `.mobileconfig` is | Lead for TRM, not a verdict signal |
+| `app_download_urls` | App files and store pages the site's HTML, scripts or network responses point at (`extract/app_downloads.py`; downloads stay blocked). Pilot site 117's deposit flow is inside `BTCC.apk`; the file name and host are the only web-visible trace. A store link alone (031 links the real Phantom wallet) is not evidence of harm; an off-store `.apk` or `.mobileconfig` is | Lead for an investigator, not a verdict signal |
 | `address_details` | Objects with `address`, `normalized`, `tier`, `format`, `labels`, source, stage, screenshot, `sighting_count` | Evidence for reviewers |
 
 **Confidence and the recall bias.** Because `scam_threshold` is 0.45, a site with `scam_probability` in [0.45, 0.5) is labeled `scam` with `confidence` below 0.5. That is intended: it marks the shaky verdicts the recall lean produced. Conversely a `not_scam` always has `confidence` above 0.55. The README states this.
@@ -833,12 +833,12 @@ An assumption is "valid" here if it's (a) reasonable given the evidence, (b) sta
 
 | ID | Assumption | Why it's reasonable | If wrong → mitigation | How to check |
 |---|---|---|---|---|
-| A1 | A **scam** is a site whose main purpose is to get victims to send money, credentials, or wallet access under false pretenses | Matches every example in the spec; broad enough for fake shops | Grader uses a narrower crypto-only definition → `scam_type` lets them filter `fake_shop` out | Compare with hand labels |
+| A1 | A **scam** is a site whose main purpose is to get victims to send money, credentials, or wallet access under false pretenses | Matches every example in the requirements; broad enough for fake shops | A user wants a narrower crypto-only definition → `scam_type` lets them filter `fake_shop` out | Compare with hand labels |
 | A2 | **Fake e-commerce counts as a scam** even without crypto | About 26 shop-style domains in the list; they're clearly in the dataset for a reason | They were intended as negatives → documented, and the `scam_type` filter handles it | Check whether shop sites show crypto payment or are plain stores |
 | A3 | **Showing a crypto address is not itself evidence of a scam** | Donations, legitimate merchants and exchanges show addresses | — | Signal weight for "has address" stays near zero |
-| A4 | The list **contains some legitimate negatives**, proportion unknown | "Classify as scam or not" implies both exist; the spec warns about ambiguity | List is 100% scams → we lose a little by being conservative, but no false-positive risk | Look at live sites with no scam signals |
-| A5 | **Binary output is required**, so dead sites still get a verdict | The spec says scam / not scam | — | — |
-| A6 | **Dead sites are judged on recovered or indirect evidence** (decided 2026-10-04 after triage: 104/160 not live): Wayback snapshot first, else domain/sibling/warning-page signals lean scam at low confidence, else `not_scam` at low confidence (§5.2a) | Graders' labels likely come from a scam feed, so a blanket `not_scam` would get most dead sites wrong; `status` + `evidence_source` keep it honest | Ground truth treats dead sites as negatives → `evidence_source` lets a reader filter them | Hand-label dead sites from snapshots where possible |
+| A4 | The list **contains some legitimate negatives**, proportion unknown | "Classify as scam or not" implies both exist; the requirements warn about ambiguity | List is 100% scams → we lose a little by being conservative, but no false-positive risk | Look at live sites with no scam signals |
+| A5 | **Binary output is required**, so dead sites still get a verdict | The requirements say scam / not scam | — | — |
+| A6 | **Dead sites are judged on recovered or indirect evidence** (decided 2026-10-04 after triage: 104/160 not live): Wayback snapshot first, else domain/sibling/warning-page signals lean scam at low confidence, else `not_scam` at low confidence (§5.2a) | The list likely comes from a scam feed, so a blanket `not_scam` would get most dead sites wrong; `status` + `evidence_source` keep it honest | Ground truth treats dead sites as negatives → `evidence_source` lets a reader filter them | Hand-label dead sites from snapshots where possible |
 
 ### 4.2 Sites and their behavior
 
@@ -847,7 +847,7 @@ An assumption is "valid" here if it's (a) reasonable given the evidence, (b) sta
 | A7 | A **significant share of sites are dead or taken down** | Scam domains are short-lived; free-host URLs get removed fast | — | Triage counts |
 | A8 | **h5./m./wap sites are mobile single-page apps** that need JS and a phone viewport | Common pattern for pig-butchering trading apps | They're ordinary sites → mobile viewport costs nothing | Triage: SPA shell detection |
 | A9 | **Deposit addresses often load from an API**, not static HTML | Typical of SPA exchanges | — | Count `network_response` vs `dom_text` sources |
-| A10 | **Deposit addresses can be per-account**: each registered user gets a unique address | Many scam platforms generate per-user deposit wallets | Our addresses won't match the grader's → document clearly; the extraction is still correct for our account | Register twice on one site and compare (if time allows) |
+| A10 | **Deposit addresses can be per-account**: each registered user gets a unique address | Many scam platforms generate per-user deposit wallets | Our addresses won't match what another account sees → document clearly; the extraction is still correct for our account | Register twice on one site and compare (if time allows) |
 | A11 | **Many sites require registration; some require invite codes, SMS or KYC** | Pig-butchering apps gate access | Recorded as `blocked_at`, not a silent failure | `stop_reason` counts |
 | A12 | **Sites may be multilingual** (Chinese, Vietnamese, Thai, etc.) | Domain names and TLDs suggest Asian targeting | — | The LLM handles multilingual pages; heuristics use multilingual keywords |
 | A13 | **Some sites geofence** by country or block datacenter IPs | Common anti-researcher tactic | We see a blank or decoy page → note it; residential/regional proxies go under future work | Compare a site's response from two networks if possible |
@@ -867,9 +867,9 @@ An assumption is "valid" here if it's (a) reasonable given the evidence, (b) sta
 | A20 | **Transaction hashes (64 hex) and contract addresses are not targets** | Spec asks for addresses | Excluded by length rule + blocklist |
 | A32 | **Legacy `1…`/`3…` addresses are Bitcoin**, though Bitcoin Cash legacy addresses share the format | BTC is far more common on these sites | Network label defaults to Bitcoin with ~0.9 confidence; context overrides |
 | A33 | **One EVM address may serve several assets** (ETH, USDT-ERC20, BNB) | One wallet can receive all of them | `labels` is a list, one entry per asset/network with its own evidence |
-| A34 | **TRM may compare address strings exactly, possibly case-sensitively** | A script-based check is the simplest way to score completeness | Report addresses as shown on the site, plus a normalized form | Nothing to check; low cost to hedge |
+| A34 | **Consumers may compare address strings exactly, possibly case-sensitively** | A script-based check is the simplest way to check completeness | Report addresses as shown on the site, plus a normalized form | Nothing to check; low cost to hedge |
 | A35 | **Verdict labels may be parsed by a script** | Same reasoning | `classification` string plus a boolean `is_scam` | — |
-| A36 | **For this audience, missing a scam costs more than flagging a borderline site** | TRM's work is catching fraud; the list is probably scam-heavy | `scam_threshold` 0.45 (slight recall lean), calibrated on hand labels and stated in the README | Check false-positive rate on the legitimate-looking sites in the label set |
+| A36 | **For this audience, missing a scam costs more than flagging a borderline site** | The goal is catching fraud; the list is probably scam-heavy | `scam_threshold` 0.45 (slight recall lean), calibrated on hand labels and stated in the README | Check false-positive rate on the legitimate-looking sites in the label set |
 
 ### 4.4 Classification and LLM
 
@@ -1199,10 +1199,10 @@ The README's "alternatives" section should draw from this table, plus whatever t
 
 | Option | What it is | Verdict | Why |
 |---|---|---|---|
-| **Playwright + Claude tool use (own loop)** | Playwright drives the browser; a small loop asks Claude to pick one whitelisted action per step | **Chosen** | Full control over the things graded: network-response capture (`page.on("response")`), request blocking (`page.route`), init scripts for the mock wallet, per-site isolated contexts, tracing. The loop is small enough to explain line by line |
+| **Playwright + Claude tool use (own loop)** | Playwright drives the browser; a small loop asks Claude to pick one whitelisted action per step | **Chosen** | Full control over what matters most: network-response capture (`page.on("response")`), request blocking (`page.route`), init scripts for the mock wallet, per-site isolated contexts, tracing. The loop is small enough to explain line by line |
 | **Stagehand v4** (Browserbase, MIT, Python 4.1.0) | SDK of AI primitives: `observe()` lists actions, `act()` performs one (replayable without an LLM call), `extract()` returns Pydantic data; `%variables%` keep secrets from the model. v4 removed the built-in `agent()`; you write the loop. Runs locally and can attach to a Playwright-launched browser | **Deferred; swap-in option** | Would save roughly 2-5 hours on element finding only. Its documented Page API has `addInitScript`, screenshots, `evaluate`, locators, but no network-response events or request routing, so Playwright is needed anyway. Two drivers on one browser is an untested integration risk, and each step costs two LLM calls (our loop + Stagehand's grounding). Revisit if the pilot's failure tally shows element-finding is the main cause |
 | **browser-use** | Python library: give it a goal, it runs the whole agent loop | Fallback for stuck sites only | Fastest prototype, but the loop is a black box: harder to enforce the action whitelist, capture network bodies, or inject the mock wallet |
-| **Browserbase cloud browsers** | Hosted browsers with dashboards, session recordings, network timing | Rejected | Costs money and another key; routes scam traffic through a third party (acceptable-use terms unchecked); the challenge asks us to show our own sandbox. Playwright tracing gives replayable recordings locally |
+| **Browserbase cloud browsers** | Hosted browsers with dashboards, session recordings, network timing | Rejected | Costs money and another key; routes scam traffic through a third party (acceptable-use terms unchecked); the goal is to show our own sandbox. Playwright tracing gives replayable recordings locally |
 | **LangGraph** | Graph/state-machine orchestration library | Rejected | The per-site graph has about five states and one loop. A plain-Python state machine (§5.2) is clearer and has no dependency. Reconsider if routing grows (multi-tier fallbacks, human review) |
 | **Pixel-based computer-use agents** | Model sees screenshots and clicks coordinates | Partial: `click_at` fallback only | Slower and costlier across 160 sites; DOM actions are more reliable for forms. Kept as a fallback for non-semantic widgets |
 | **Regex-only extraction, no validation** | Pattern match addresses | Rejected | Random base58/hex strings and token contracts produce false positives; checksums and the blocklist fix that |
@@ -1220,7 +1220,7 @@ Decision: hardened Docker on a personal Mac (A) over a throwaway cloud server (B
 | Hours left for accuracy work (B costs ~3-5.5h: setup 1.5-3, debug friction ~1-1.5, bug-or-environment confusion ~0.5-1) | A | 12-35% of a 15-25h budget | Medium |
 | README security story | B, slightly | Small | Medium |
 
-**Why A:** accuracy and completeness are graded High, security Medium, and a documented hardened setup already earns most of the security credit. The hours B costs are the same hours used to fix navigation failures and measure accuracy.
+**Why A:** accuracy and completeness matter most, then security, and a documented hardened setup already covers most of the security goal. The hours B costs are the same hours used to fix navigation failures and measure accuracy.
 
 **What would flip it to B:** the Mac holds things that can't be recovered and can't be isolated; the budget is near 25h; or an early cloud trial runs smoothly.
 
