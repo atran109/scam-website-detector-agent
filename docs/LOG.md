@@ -1319,3 +1319,17 @@ One sample per provider was downloaded on the host from the provider's own site 
 - Rejected [alt]: Claude Fable 5.2 ($8 / $40): about twice the cost, an estimated $45 for 450 sites against the $40 labelling cap, and it would need refusal handling the gateway does not have for that model.
 - [limit] Opus 5.5 and the judge's Sonnet 5.5 are the same model family; DESIGN §8.8 already lists this.
 - The `labeller` role is subject to the same request whitelist as the other roles (tested: server tools and unknown `output_config` keys are still rejected).
+
+## 2026-11-15 · H+? · DECISION [arch] (user): the labeller's inputs and run rules (plan Task 7)
+- `src/scamhunter/labeller.py`, `scamhunter label`, `make label`. Four choices the user made in a dialog:
+  - **No pipeline signals in the labeller prompt.** DESIGN §8.4 listed them; the plan left them out. The labeller's disagreements with the pipeline pick which dev sites get human review, so it should not be shown the pipeline's own clues. Rejected [alt]: following §8.4 as written. §8.4 updated (amends the 2026-11-14 23:48 approval of §8).
+  - **Errors are retried on rerun.** A site whose last line is `error` is tried again; the last line per site wins. A malformed reply comes back from the gateway cache for free and stays `error`; a gateway outage gets a second chance. Rejected [alt]: any line counts as done, which would make a brief outage permanent.
+  - **Parallel, like classify:** `run.concurrency` sites at once; the cap can be overshot by at most `concurrency - 1` sites (under $0.50 at Opus prices). Rejected [alt]: one at a time, about 3 hours for 500 sites.
+  - **Effort `high`** for Opus. Rejected [alt]: `medium`, the judge's setting.
+- My calls, within the plan:
+  - The spend cap counts every line already in `labeller.jsonl`, so `--spend-cap 40` is the labeller's whole budget across reruns, matching the $40 line in §8.6.
+  - "Captured" means `runs/<id>/sites/<site_id>/` exists, which capture creates for every site it attempts. Manifest rows never captured (dead at liveness, or over quota) are skipped, not labelled `excluded`.
+  - The landing page is the last non-agent snapshot, the same one the judge sees.
+  - The prompt also gets the final URL. The plan's list left it out, but phishing cannot be judged without the domain. The source's note (DFPI narrative) is wrapped as untrusted along with the page text and title.
+  - `label_run` has two keyword arguments the plan's signature did not: `model` (for the cost estimate) and `concurrency`.
+- [limit] Costs are estimates at list price, not billing; the gateway usage log figure printed after each run is the one to record.

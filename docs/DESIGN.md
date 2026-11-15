@@ -1335,10 +1335,16 @@ Stored in `eval/dataset_v1/labels.csv` with the columns `eval/labels.csv` alread
 
 - **Values:** `scam`, `not_scam`, or `excluded` (the capture shows no judgeable content: parked,
   blank, blocked, taken down). Excluded sites are counted and reported but not scored.
-- **Labeller pass:** a separate script calls the strongest available model once per site with
-  the screenshot, page text, extracted signals and the source's note. It sees more than the
-  classifier does (the classifier never sees the source). It writes `labeller_verdict` and a
-  one-paragraph reason.
+- **Labeller pass:** `make label` (`src/scamhunter/labeller.py`) calls the `labeller` role
+  (Claude Opus 5.5, effort high) once per captured site with the landing screenshot, the first
+  6,000 characters of page text, the final URL and the source's name, claim and note, all
+  page- and feed-derived parts wrapped as untrusted. It sees the source, which the classifier
+  never does, but not the pipeline's signals or verdict, so its disagreements with the pipeline
+  are independent. It writes `labeller_verdict` and a one-paragraph reason to
+  `runs/<id>/labeller.jsonl`. A site with no landing snapshot is `excluded` without a call; a
+  malformed reply or failed call is `error`, is retried on the next run, and goes to human
+  review if it stays an error. `--spend-cap` covers every line in the file, so it is the
+  labeller's total budget across reruns.
 - **Human review** (through the existing `make review` page):
   - every site in the test split;
   - in the dev split, every site where the labeller and the pipeline disagree, plus a seeded

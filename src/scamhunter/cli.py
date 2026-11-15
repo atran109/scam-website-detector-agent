@@ -1,13 +1,18 @@
-"""Entrypoints: triage, run, capture, classify, rescore, report, review and the mock runners."""
+"""Entrypoints: triage, run, capture, classify, label, rescore, report, review and the mock
+runners."""
 
 import argparse
 import asyncio
+import json
 import shutil
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
 from scamhunter.config import REPO_ROOT, Settings, load_settings
+from scamhunter.labeller import label_run, latest_verdicts
+from scamhunter.llm.client import LLMClient
 from scamhunter.llm.usage_log import count_lines, read_usage
 from scamhunter.models import Site, SiteResult
 from scamhunter.pipeline import (
@@ -29,6 +34,7 @@ from scamhunter.report.writer import supplement_address_evidence, write_results
 from scamhunter.store import RUNS_DIR, new_run_id, run_dir
 
 URLS_PATH = REPO_ROOT / "data" / "urls.txt"
+MANIFEST_PATH = REPO_ROOT / "data" / "dataset" / "v1" / "manifest.jsonl"
 URLS_FILE_ID_WIDTH = 4  # site ids of a --urls file (DESIGN §8.2)
 OUTPUT_DIR = REPO_ROOT / "output"
 
@@ -213,6 +219,41 @@ def cmd_classify(args: argparse.Namespace) -> int:
     results = asyncio.run(classify_from_evidence(settings, sites, out, args.spend_cap))
     usage = _report_gateway_usage(out, usage_from, {s.site_id for s in sites})
     _finalize(results, settings, args.run_id, usage.model_dump())
+    return 0
+
+
+def cmd_label(args: argparse.Namespace) -> int:
+    """Dataset labeller (DESIGN §8.4): a first-draft label per captured site, for human review."""
+    settings = load_settings()
+    manifest_path = Path(args.manifest)
+    if not manifest_path.exists():
+        print(f"error: no manifest at {manifest_path}", file=sys.stderr)
+        return 1
+    manifest = [json.loads(line) for line in manifest_path.read_text().splitlines() if line]
+    out = run_dir(args.run_id)
+    labels = out / "labeller.jsonl"
+    usage_from = count_lines()
+
+    async def go() -> None:
+        client = LLMClient(settings.llm.gateway_url)
+        try:
+            await label_run(
+                client,
+                out,
+                manifest,
+                labels,
+                args.spend_cap,
+                model=settings.llm.labeller_model,
+                concurrency=settings.run.concurrency,
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(go())
+    _report_gateway_usage(out, usage_from, {row["site_id"] for row in manifest})
+    latest = latest_verdicts(labels).values()
+    counts = Counter(v.verdict for v in latest)
+    print(f"labels so far: {dict(sorted(counts.items()))} → {labels}")
     return 0
 
 
@@ -417,6 +458,18 @@ def main(argv: list[str] | None = None) -> int:
     classify.add_argument("--run-id", required=True)
     classify.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
 
+    label = sub.add_parser(
+        "label", help="dataset labeller: first-draft labels from a run's saved evidence"
+    )
+    label.add_argument("--run-id", required=True)
+    label.add_argument("--manifest", default=str(MANIFEST_PATH), help="dataset manifest.jsonl")
+    label.add_argument(
+        "--spend-cap",
+        type=float,
+        required=True,
+        help="total estimated USD for this run's labels, counting earlier invocations",
+    )
+
     rescore_parser = sub.add_parser(
         "rescore", help="re-classify a run from saved evidence (no visits)"
     )
@@ -464,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
         "run": cmd_run,
         "capture": cmd_capture,
         "classify": cmd_classify,
+        "label": cmd_label,
         "rescore": cmd_rescore,
         "report": cmd_report,
         "review": cmd_review,
