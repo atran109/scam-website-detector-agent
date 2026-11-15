@@ -86,7 +86,7 @@ pilot:
 classify: build
 	@test -n "$(RUN)" || (echo "usage: make classify RUN=<run id>"; exit 1)
 	$(COMPOSE) up -d --wait llm-gateway
-	$(COMPOSE) run --rm --no-deps crawler scamhunter classify --run-id $(notdir $(RUN))
+	$(COMPOSE) run --rm --no-deps crawler scamhunter classify --run-id $(notdir $(RUN)) $(ARGS)
 
 # Re-classify from saved evidence; no site visits, so no selftest gate. Needs the gateway.
 RUN ?=
@@ -95,7 +95,7 @@ RUN ?=
 rescore: build
 	@test -n "$(RUN)" || (echo "usage: make rescore RUN=runs/<id>"; exit 1)
 	$(COMPOSE) up -d --wait llm-gateway
-	$(COMPOSE) run --rm --no-deps crawler scamhunter rescore --run-id $(notdir $(RUN))
+	$(COMPOSE) run --rm --no-deps crawler scamhunter rescore --run-id $(notdir $(RUN)) $(ARGS)
 
 # Precision/recall at 0.45 and 0.5 against eval/labels.csv (no containers, no network).
 eval: venv

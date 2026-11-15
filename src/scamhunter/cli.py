@@ -5,6 +5,7 @@ import asyncio
 import shutil
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from scamhunter.config import REPO_ROOT, Settings, load_settings
 from scamhunter.llm.usage_log import count_lines, read_usage
@@ -28,6 +29,7 @@ from scamhunter.report.writer import supplement_address_evidence, write_results
 from scamhunter.store import RUNS_DIR, new_run_id, run_dir
 
 URLS_PATH = REPO_ROOT / "data" / "urls.txt"
+URLS_FILE_ID_WIDTH = 4  # site ids of a --urls file (DESIGN §8.2)
 OUTPUT_DIR = REPO_ROOT / "output"
 
 
@@ -35,7 +37,8 @@ def _select(sites: list[Site], only: str | None) -> list[Site]:
     if not only:
         return sites
     by_id = {s.site_id: s for s in sites}
-    wanted = [f"{int(i):03d}" for i in only.split(",")]
+    width = len(sites[0].site_id) if sites else 3
+    wanted = [f"{int(i):0{width}d}" for i in only.split(",")]
     return [by_id[i] for i in wanted if i in by_id]  # the order given (the pilot's order)
 
 
@@ -60,10 +63,23 @@ def _finalize(
 
 def _selected(args: argparse.Namespace) -> list[Site]:
     """The sites a command works on; an empty selection is an error, not a clean no-op."""
-    sites = _select(load_sites(URLS_PATH), args.only)
+    sites = _select(_all_sites(args), args.only)
     if not sites:
-        raise SystemExit(f"error: --only {args.only!r} matches no site in data/urls.txt")
+        raise SystemExit(f"error: --only {args.only!r} matches no site in {_urls_path(args)}")
     return sites
+
+
+def _urls_path(args: argparse.Namespace) -> Path:
+    urls = getattr(args, "urls", None)
+    return Path(urls) if urls else URLS_PATH
+
+
+def _all_sites(args: argparse.Namespace) -> list[Site]:
+    """Every site of the input file: data/urls.txt, or the file given with --urls."""
+    path = _urls_path(args)
+    if not path.is_file():
+        raise SystemExit(f"error: URL file not found: {path}")
+    return load_sites(path, URLS_FILE_ID_WIDTH if getattr(args, "urls", None) else 3)
 
 
 async def ask_operator(question: str) -> bool:
@@ -202,7 +218,7 @@ def cmd_classify(args: argparse.Namespace) -> int:
 
 def cmd_rescore(args: argparse.Namespace) -> int:
     settings = load_settings()
-    sites = load_sites(URLS_PATH)
+    sites = _all_sites(args)
     usage_from = count_lines()
     results = asyncio.run(rescore(settings, sites, run_dir(args.run_id)))
     usage = _report_gateway_usage(run_dir(args.run_id), usage_from, {s.site_id for s in sites})
@@ -405,6 +421,10 @@ def main(argv: list[str] | None = None) -> int:
         "rescore", help="re-classify a run from saved evidence (no visits)"
     )
     rescore_parser.add_argument("--run-id", required=True)
+    for command in (triage, run, capture, classify, rescore_parser):
+        command.add_argument(
+            "--urls", help="URL file to use instead of data/urls.txt (four-digit site ids)"
+        )
     report = sub.add_parser("report", help="publish a run's results into output/")
     report.add_argument("--run-id", required=True)
     report.add_argument(

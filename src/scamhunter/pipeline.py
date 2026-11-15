@@ -83,8 +83,10 @@ INTERSTITIAL_BUTTON = re.compile(r"ignore\s*&\s*proceed|proceed anyway|continue 
 # ============================================================
 
 
-def load_sites(path: Path) -> list[Site]:
-    """One Site per non-blank line, in file order. No dedupe: paths like /wap are significant."""
+def load_sites(path: Path, id_width: int = 3) -> list[Site]:
+    """One Site per non-blank line, in file order. No dedupe: paths like /wap are significant.
+    `id_width` is the zero-padding of site ids: 3 for data/urls.txt, 4 for a `--urls` file
+    (DESIGN §8.2: a dataset file can hold up to 4,000 lines)."""
     sites: list[Site] = []
     for line_no, line in enumerate(path.read_text().splitlines(), start=1):
         url = line.strip()
@@ -95,7 +97,7 @@ def load_sites(path: Path) -> list[Site]:
             raise ValueError(f"{path}:{line_no}: not an http(s) URL: {url!r}")
         sites.append(
             Site(
-                site_id=f"{len(sites) + 1:03d}",
+                site_id=f"{len(sites) + 1:0{id_width}d}",
                 url=url,
                 host=parts.hostname,
                 registrable_domain=_extract(parts.hostname).top_domain_under_public_suffix,
