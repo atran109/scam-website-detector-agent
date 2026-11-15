@@ -1,9 +1,10 @@
 """Group sibling sites into clusters so none straddles the dev/test split (DESIGN §8.5).
 
-Two sites are linked if they share a registrable domain, show the same crypto address, or
-have the same page structure (a hash of the landing page's tag skeleton). Clusters are the
-connected components of those links, found with union-find. A small first version of the
-Stage B operator clustering, kept outside the pipeline."""
+Two sites are linked if they share a registrable domain (as listed, or the one their landing
+page redirected to), show the same crypto address, or have the same page structure (a hash of
+the landing page's tag skeleton). Clusters are the connected components of those links, found
+with union-find. A small first version of the Stage B operator clustering, kept outside the
+pipeline."""
 
 import hashlib
 from collections import defaultdict
@@ -20,6 +21,7 @@ class ClusterInput(BaseModel):
     addresses: list[str]  # dedupe keys of the site's primary-tier addresses
     dom_hash: str | None
     judgeable: bool  # the labeller called it scam or not_scam (not excluded, not error)
+    final_domain: str | None = None  # registrable domain the landing page ended up on
 
 
 class _TagCollector(HTMLParser):
@@ -60,8 +62,9 @@ class _UnionFind:
 
 def clusters(rows: list[ClusterInput]) -> dict[str, str]:
     """site_id -> cluster_id ("c0001"…). Clusters are numbered by their smallest site id, so the
-    same input always gives the same ids. Sites that are not judgeable, or whose page is too
-    small to hash, take no structure link: parked and error pages look alike everywhere."""
+    same input always gives the same ids. Sites that are not judgeable take no structure link
+    and no redirect link (parked and error pages look alike, and sit on shared hosts); nor does
+    a page too small to hash take a structure link."""
     uf = _UnionFind([r.site_id for r in rows])
     by_key: dict[str, list[str]] = defaultdict(list)
     for r in rows:
@@ -70,6 +73,10 @@ def clusters(rows: list[ClusterInput]) -> dict[str, str]:
             by_key[f"address:{address}"].append(r.site_id)
         if r.judgeable and r.dom_hash:
             by_key[f"dom:{r.dom_hash}"].append(r.site_id)
+        # Where the page ended up counts as a domain too: several listed domains that all
+        # redirect to one host are siblings, and so is a site listed under that host itself.
+        if r.judgeable and r.final_domain and r.final_domain != r.registrable_domain:
+            by_key[f"domain:{r.final_domain}"].append(r.site_id)
     for members in by_key.values():
         for other in members[1:]:
             uf.union(members[0], other)

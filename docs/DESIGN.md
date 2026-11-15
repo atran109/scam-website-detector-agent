@@ -1299,7 +1299,9 @@ A source's listing is a *lead*, not a label. Labels come from the captured evide
    the most recent 60 daily files, an equal number per day, because older listings are almost
    all dead). The existing triage stage (§5.1a) checks them through the egress proxy, after
    `make selftest`, in batches until each source's quota of `live` sites is met or a cap of
-   **4,000 checks** is reached.
+   **4,000 checks** is reached. Every batch runs `triage --new-only`, which keeps the results
+   already in the run's `triage.jsonl` and contacts only the sites that have none, so each site
+   is checked once and the cap counts real requests.
 3. **Capture and classify.** The existing `capture` and `classify` commands run on the live
    candidates: landing page only, **no agent, no form submissions**. This is what the
    classifier benchmark needs, and it guarantees no account is ever created on a legitimate
@@ -1312,6 +1314,9 @@ Changes to the pipeline (amended 2026-11-14 after reading the code; LOG):
   the dataset's URL file instead of the fixed `data/urls.txt`. Files passed this way get
   four-digit site ids (three digits would overflow at 4,000 lines); `data/urls.txt` keeps three.
 - **`--spend-cap` on `classify`**, which had none.
+- **`--new-only` on `triage`** (added 2026-11-15 after the branch review; LOG): without it the
+  command checks every site it is given and replaces the results file, which the batch design
+  cannot use.
 - **A `labeller` role in the LLM gateway** (§5.6), mapped to `llm.labeller_model`. The gateway
   chooses the model by role, and the labeller needs a stronger model than the judge. The new
   role is subject to the same request whitelist as the other three.
@@ -1350,7 +1355,9 @@ Stored in `eval/dataset_v1/labels.csv` with the columns `eval/labels.csv` alread
   `runs/<id>/labeller.jsonl`. A site with no landing snapshot is `excluded` without a call; a
   malformed reply or failed call is `error`, is retried on the next run, and goes to human
   review if it stays an error. `--spend-cap` covers every line in the file, so it is the
-  labeller's total budget across reruns.
+  labeller's total budget across reruns. A site whose evidence cannot be read (a broken
+  screenshot, say) is an `error` too and never stops the run. The cost of each invocation goes
+  to `runs/<id>/labeller_usage.json`, beside classify's `usage.json`.
 - **Human review** (through the existing `make review` page):
   - every site in the test split;
   - in the dev split, every site where the labeller and the pipeline disagree, plus a seeded
@@ -1361,8 +1368,11 @@ Stored in `eval/dataset_v1/labels.csv` with the columns `eval/labels.csv` alread
   they may be used for tuning but never for a reported number.
 - **Tools:** `python -m eval.dataset_v1.labels --build` writes `labels.csv` from the manifest,
   the labeller file and `split.jsonl`; rerunning it refreshes unreviewed rows and never touches
-  a reviewed one. `--queue` lists the sites to review (an `excluded` or `error` draft always
-  counts as a disagreement, so those dev sites are queued too). `--agreement` reports the
+  a reviewed one; the file is replaced only once the new one is written in full. `--queue`
+  lists the sites to review (an `excluded` or `error` draft always counts as a disagreement,
+  so those dev sites are queued too) and saves the queue, with the reason for each site, to
+  `data/dataset/v1/review_queue.jsonl` (committed). The random 20% is drawn once; later runs
+  only add new test rows and new disagreements. `--agreement` reads that file and reports the
   change rate separately for the test split, the dev disagreements and the random dev sample;
   only the first and last are unbiased. `eval/evaluate.py --split test --reviewed-only` gives
   the reported numbers.
@@ -1372,6 +1382,9 @@ Stored in `eval/dataset_v1/labels.csv` with the columns `eval/labels.csv` alread
 Sibling sites must not sit on both sides of the split. Sites are grouped into clusters by
 connected components over three strong links: same registrable domain, same extracted crypto
 address, or the same page-structure hash (a hash of the DOM tag skeleton of the landing page).
+"Same registrable domain" covers the domain a site was listed under and the one its landing
+page redirected to (added 2026-11-15; LOG): the sampler takes one site per listed domain, so
+without the redirect target this link could never fire.
 This is a small first version of the Stage B operator clustering and lives in
 `eval/dataset_v1/cluster.py`, outside the pipeline.
 
@@ -1380,7 +1393,12 @@ This is a small first version of the Stage B operator clustering and lives in
 - **Structure hash:** sha256 of the landing page's opening-tag sequence. Pages with fewer than
   30 tags get none, and sites the labeller called `excluded` or `error` take no structure link,
   because parked, blank and block pages look alike across unrelated domains. So the labeller
-  runs before the split.
+  runs before the split. The same sites take no redirect link (parking and block pages sit on
+  shared hosts).
+- The split command refuses to run while any captured site has no labeller verdict, a
+  labeller `error`, or no classify result (`--allow-incomplete` overrides): such a site would
+  silently lose its links, and the split is made only once.
+- A domain that ScamSniffer lists on several days keeps its earliest date.
 - A cluster with any scam-list member counts as a scam cluster, even if it also holds a site
   from a legitimate list (a phishing copy sharing the real site's structure); the split command
   prints such clusters.

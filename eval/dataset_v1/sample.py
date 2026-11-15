@@ -13,6 +13,7 @@ import argparse
 import json
 import random
 from collections import Counter, defaultdict
+from datetime import date
 from pathlib import Path
 
 from eval.dataset_v1.models import Candidate, ManifestRow, Source
@@ -74,7 +75,9 @@ def remove_conflicts(cands: list[Candidate]) -> tuple[list[Candidate], list[str]
         if len({c.expected for c in group}) > 1:
             dropped.append(domain)
             continue
-        kept.append(min(group, key=lambda c: PRIORITY.index(c.source)))
+        # Highest-priority source; within it the earliest listing, so a domain that ScamSniffer
+        # lists again later keeps its first date (the time split sorts by it, DESIGN §8.5).
+        kept.append(min(group, key=lambda c: (PRIORITY.index(c.source), c.listed_on or date.max)))
     return kept, dropped
 
 

@@ -20,6 +20,8 @@ from scamhunter.labeller import landing_snapshot
 from scamhunter.models import ActionType, BlockedReason, NavigationTrace, SiteResult
 
 MAX_AGENT_SITES = 40  # DESIGN §8.6
+FILL_DONE = {"ok", "navigated"}  # AgentStep.result values of an action that was carried out
+
 # Gates that mean the agent got as far as a sign-up form before it stopped.
 SIGN_UP_GATES = {
     BlockedReason.INVITE_CODE,
@@ -45,12 +47,13 @@ def pick_agent_sites(
 
 
 def reached_registration(nav: NavigationTrace) -> bool:
-    """Registered, typed into a form, or stopped at a sign-up gate (LOG 2026-11-15)."""
-    return (
-        nav.registered
-        or any(step.action.type == ActionType.FILL for step in nav.steps)
-        or nav.blocked_at in SIGN_UP_GATES
+    """Registered, typed into a form, or stopped at a sign-up gate (LOG 2026-11-15). A fill
+    counts only if it happened: the policy allowed it and the browser carried it out."""
+    filled = any(
+        step.action.type == ActionType.FILL and step.allowed and step.result in FILL_DONE
+        for step in nav.steps
     )
+    return nav.registered or filled or nav.blocked_at in SIGN_UP_GATES
 
 
 def tally(sites: list[tuple[NavigationTrace | None, list[str]]]) -> dict[str, int]:

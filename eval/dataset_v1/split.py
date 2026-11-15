@@ -27,6 +27,7 @@ from typing import Literal
 from eval.dataset_v1.cluster import ClusterInput, by_cluster, clusters, dom_skeleton_hash
 from eval.dataset_v1.models import SCAM_SOURCES
 from eval.dataset_v1.sample import MANIFEST_PATH, PRIORITY, REPO_ROOT, SEED, load_manifest
+from eval.dataset_v1.sources import normalise_host, registrable
 from pydantic import BaseModel
 
 from scamhunter.labeller import landing_snapshot, latest_verdicts
@@ -100,9 +101,18 @@ def _primary_addresses(result: SiteResult) -> list[str]:
     return sorted({a.dedupe_key for a in every if a.tier == AddressTier.PRIMARY})
 
 
-def load_inputs(run_dir: Path, manifest_path: Path) -> tuple[list[ClusterInput], list[SplitInput]]:
-    """Cluster and split inputs for every captured site (its folder exists under sites/).
-    Needs the classify checkpoint (addresses) and the labeller file (judgeable)."""
+def _final_domain(url: str) -> str | None:
+    host = normalise_host(url)
+    return registrable(host) if host else None
+
+
+def load_inputs(
+    run_dir: Path, manifest_path: Path
+) -> tuple[list[ClusterInput], list[SplitInput], dict[str, list[str]]]:
+    """Cluster and split inputs for every captured site (its folder exists under sites/), and
+    what is missing: site ids per reason. Needs the classify checkpoint (addresses) and the
+    labeller file (judgeable). A site with something missing would silently lose its links, and
+    the split is made only once, so `main` refuses to go on unless told to."""
     checkpoint, labels = run_dir / "checkpoint.jsonl", run_dir / "labeller.jsonl"
     for path, command in ((checkpoint, "make classify"), (labels, "make label")):
         if not path.exists():
@@ -113,6 +123,7 @@ def load_inputs(run_dir: Path, manifest_path: Path) -> tuple[list[ClusterInput],
     }
     verdicts = latest_verdicts(labels)
     cluster_rows, split_rows = [], []
+    missing: dict[str, list[str]] = defaultdict(list)
     for row in load_manifest(manifest_path):
         site_dir = run_dir / "sites" / row.site_id
         if not site_dir.is_dir():
@@ -126,6 +137,12 @@ def load_inputs(run_dir: Path, manifest_path: Path) -> tuple[list[ClusterInput],
         )
         verdict = verdicts.get(row.site_id)
         result = results.get(row.site_id)
+        if verdict is None:
+            missing["no labeller verdict"].append(row.site_id)
+        elif verdict.verdict == "error":
+            missing["labeller error"].append(row.site_id)
+        if result is None:
+            missing["no classify result"].append(row.site_id)
         cluster_rows.append(
             ClusterInput(
                 site_id=row.site_id,
@@ -133,6 +150,7 @@ def load_inputs(run_dir: Path, manifest_path: Path) -> tuple[list[ClusterInput],
                 addresses=_primary_addresses(result) if result else [],
                 dom_hash=dom_hash,
                 judgeable=verdict is not None and verdict.verdict in ("scam", "not_scam"),
+                final_domain=_final_domain(snapshot.url) if snapshot else None,
             )
         )
         split_rows.append(
@@ -143,7 +161,7 @@ def load_inputs(run_dir: Path, manifest_path: Path) -> tuple[list[ClusterInput],
                 listed_on=row.listed_on,
             )
         )
-    return cluster_rows, split_rows
+    return cluster_rows, split_rows, dict(missing)
 
 
 def report(
@@ -179,13 +197,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, default=MANIFEST_PATH)
     parser.add_argument("--out", type=Path, default=SPLIT_PATH)
     parser.add_argument("--force", action="store_true", help="overwrite an existing split")
+    parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="split even if some captured sites have no label or no classify result",
+    )
     args = parser.parse_args(argv)
     if args.out.exists() and not args.force:
         print(f"error: {args.out} exists; the split is made once (DESIGN §8.5)", file=sys.stderr)
         return 1
-    cluster_rows, split_rows = load_inputs(REPO_ROOT / "runs" / args.run_id, args.manifest)
+    cluster_rows, split_rows, missing = load_inputs(REPO_ROOT / "runs" / args.run_id, args.manifest)
     if not cluster_rows:
         print("error: no captured sites in this run", file=sys.stderr)
+        return 1
+    for reason, site_ids in missing.items():
+        print(f"{len(site_ids)} sites with {reason}: {','.join(site_ids[:20])}", file=sys.stderr)
+    if missing and not args.allow_incomplete:
+        print(
+            "error: the split is made once, and these sites would lose their cluster links. "
+            "Finish `make classify` / `make label` (rerun them; raise the spend cap if it "
+            "stopped them), or pass --allow-incomplete to split anyway.",
+            file=sys.stderr,
+        )
         return 1
     assignment = clusters(cluster_rows)
     split = assign_split(split_rows, assignment)

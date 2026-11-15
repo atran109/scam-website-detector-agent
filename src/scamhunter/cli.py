@@ -13,7 +13,7 @@ from pathlib import Path
 from scamhunter.config import REPO_ROOT, Settings, load_settings
 from scamhunter.labeller import label_run, latest_verdicts
 from scamhunter.llm.client import LLMClient
-from scamhunter.llm.usage_log import count_lines, read_usage
+from scamhunter.llm.usage_log import GatewayUsage, count_lines, read_usage
 from scamhunter.models import Site, SiteResult
 from scamhunter.pipeline import (
     PIPELINE_VERSION,
@@ -108,7 +108,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
     sites = _selected(args)
     out = run_dir(args.run_id or new_run_id())
     print(f"Triage of {len(sites)} URLs → {out}/triage.jsonl")
-    records = asyncio.run(run_triage(settings, sites, out))
+    records = asyncio.run(run_triage(settings, sites, out, new_only=args.new_only))
     print("\nStatus counts:")
     for status, count in status_counts(records).most_common():
         print(f"  {status:<17} {count}")
@@ -179,11 +179,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _report_gateway_usage(out, start_line: int, site_ids: set[str]):
+def _report_gateway_usage(
+    out: Path, start_line: int, site_ids: set[str], name: str = "usage.json"
+) -> GatewayUsage:
     """What this invocation cost, from the gateway usage log (the figure to use for estimates;
-    `runs/<id>/usage.json`). Counts the log's new lines for this run's sites only."""
+    `runs/<id>/usage.json`). Counts the log's new lines for this run's sites only. `name`: the
+    labeller writes its own file, so it does not replace the classify figure of the same run."""
     usage = read_usage(start_line=start_line, site_ids=site_ids)
-    (out / "usage.json").write_text(usage.model_dump_json(indent=2))
+    (out / name).write_text(usage.model_dump_json(indent=2))
     print(f"LLM cost this invocation (gateway usage log): {usage.line()}", flush=True)
     return usage
 
@@ -250,7 +253,9 @@ def cmd_label(args: argparse.Namespace) -> int:
             await client.aclose()
 
     asyncio.run(go())
-    _report_gateway_usage(out, usage_from, {row["site_id"] for row in manifest})
+    _report_gateway_usage(
+        out, usage_from, {row["site_id"] for row in manifest}, name="labeller_usage.json"
+    )
     latest = latest_verdicts(labels).values()
     counts = Counter(v.verdict for v in latest)
     print(f"labels so far: {dict(sorted(counts.items()))} → {labels}")
@@ -417,6 +422,11 @@ def main(argv: list[str] | None = None) -> int:
     triage = sub.add_parser("triage", help="stage 0 only → runs/<id>/triage.jsonl")
     triage.add_argument("--run-id", help="run directory name (default: timestamp)")
     triage.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
+    triage.add_argument(
+        "--new-only",
+        action="store_true",
+        help="keep the run's existing results and check only sites that have none (batches)",
+    )
 
     run = sub.add_parser("run", help="full pipeline → runs/<id>/output/results.json")
     run.add_argument("--run-id", help="run directory name (default: timestamp)")

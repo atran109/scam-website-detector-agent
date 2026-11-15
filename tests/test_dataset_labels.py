@@ -13,6 +13,7 @@ from eval.dataset_v1.labels import (
     COLUMNS,
     agreement,
     build_labels,
+    freeze_queue,
     merge_reviewed,
     read_csv,
     review_queue,
@@ -151,10 +152,40 @@ def test_changed_means_reviewed_and_different() -> None:
         row("0004", "dev", "scam", "not_scam", by="alex"),  # dev disagreement, changed
     ]
     verdicts = {"0001": "scam", "0002": "scam", "0003": "scam", "0004": "not_scam"}
-    out = agreement(rows, verdicts)
+    out = agreement(rows, freeze_queue(rows, verdicts, {}))
     assert out["test"] == {"queued": 3, "reviewed": 2, "changed": 1, "rate": 0.5}
     assert out["dev_disagreement"]["changed"] == 1
     assert out["dev_sample"]["reviewed"] == 0 and out["dev_sample"]["rate"] is None
+
+
+def test_saved_queue_keeps_its_sample_when_labels_change() -> None:
+    rows = [row(f"{i:04d}", "dev", "scam") for i in range(1, 51)]
+    verdicts = {r["site_id"]: "scam" for r in rows}
+    saved = freeze_queue(rows, verdicts, {})
+    sample = {s for s, part in saved.items() if part == "dev_sample"}
+    assert len(sample) == 10
+
+    # A labeller retry turns one agreeing row into a disagreement: it is added, and the
+    # random sample stays exactly the one that was reviewed.
+    outside = next(r for r in rows if r["site_id"] not in sample)
+    outside["labeller_verdict"] = "not_scam"
+    again = freeze_queue(rows, verdicts, saved)
+    assert {s for s, part in again.items() if part == "dev_sample"} == sample
+    assert again[outside["site_id"]] == "dev_disagreement"
+    assert freeze_queue(rows, verdicts, again) == again
+
+
+def test_failed_write_leaves_the_labels_file_as_it_was(tmp_path) -> None:
+    split = {"0001": {"cluster_id": "c0001", "split": "test"}}
+    rows = build_labels([manifest_row("0001")], {"0001": draft("0001", "scam")}, split)
+    path = tmp_path / "labels.csv"
+    write_csv(path, rows)
+    before = path.read_text()
+
+    rows[0]["my_column"] = "added in a spreadsheet"
+    with pytest.raises(SystemExit, match="my_column"):
+        write_csv(path, rows)
+    assert path.read_text() == before
 
 
 # ---------- funnel ----------
@@ -182,13 +213,13 @@ def test_pick_never_takes_more_than_the_limit() -> None:
     assert len(picked) == 40
 
 
-def _step(action: ActionType) -> AgentStep:
+def _step(action: ActionType, allowed: bool = True, result: str = "ok") -> AgentStep:
     return AgentStep(
         index=0,
         page_url="https://x.example/",
         action=AgentAction(type=action, rationale="r"),
-        allowed=True,
-        result="ok",
+        allowed=allowed,
+        result=result,
         screenshot_path="",
         tokens_in=0,
         tokens_out=0,
@@ -228,6 +259,13 @@ def trace(
 )
 def test_reached_registration(nav: NavigationTrace, expected: bool) -> None:
     assert reached_registration(nav) is expected
+
+
+def test_a_refused_or_failed_fill_is_not_reaching_registration() -> None:
+    nav = trace([ActionType.CLICK])
+    nav.steps.append(_step(ActionType.FILL, allowed=False, result="refused"))
+    nav.steps.append(_step(ActionType.FILL, result="element_not_found"))
+    assert reached_registration(nav) is False
 
 
 def test_tally_counts_each_funnel_step_and_stop_reason() -> None:

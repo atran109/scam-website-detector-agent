@@ -67,6 +67,15 @@ def rows(n: int) -> list[ManifestRow]:
     ]
 
 
+def test_relisted_domain_keeps_its_earliest_date() -> None:
+    newest_first = [
+        cand("a.example", "scamsniffer", date(2026, 11, 1)),
+        cand("a.example", "scamsniffer", date(2026, 9, 20)),
+    ]
+    kept, _ = remove_conflicts(newest_first)
+    assert [c.listed_on for c in kept] == [date(2026, 9, 20)]
+
+
 def test_conflicting_domain_dropped_from_both_sides() -> None:
     kept, dropped = remove_conflicts(
         [

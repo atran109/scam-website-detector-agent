@@ -25,6 +25,7 @@ def ci(
     addresses: list[str] | None = None,
     dom_hash: str | None = None,
     judgeable: bool = True,
+    final_domain: str | None = None,
 ) -> ClusterInput:
     return ClusterInput(
         site_id=site_id,
@@ -32,6 +33,7 @@ def ci(
         addresses=addresses or [],
         dom_hash=dom_hash,
         judgeable=judgeable,
+        final_domain=final_domain,
     )
 
 
@@ -90,6 +92,24 @@ def test_links_are_transitive() -> None:
         ci("0003", "c.example", dom_hash="h"),
     ]
     assert len(set(clusters(rows).values())) == 1
+
+
+def test_sites_redirecting_to_one_host_are_linked() -> None:
+    rows = [
+        ci("0001", "a.example", final_domain="drainer.example"),
+        ci("0002", "b.example", final_domain="drainer.example"),
+        ci("0003", "drainer.example"),  # listed under the host the others land on
+        ci("0004", "c.example", final_domain="c.example"),
+    ]
+    assert by_cluster(clusters(rows)) == {"c0001": ["0001", "0002", "0003"], "c0002": ["0004"]}
+
+
+def test_unjudgeable_pages_take_no_redirect_link() -> None:
+    rows = [
+        ci("0001", "a.example", final_domain="parking.example", judgeable=False),
+        ci("0002", "b.example", final_domain="parking.example", judgeable=False),
+    ]
+    assert len(set(clusters(rows).values())) == 2
 
 
 def test_blank_pages_do_not_fuse() -> None:
@@ -238,7 +258,9 @@ def run(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_load_inputs_reads_captured_sites_only(run: tuple[Path, Path]) -> None:
-    cluster_rows, split_rows = load_inputs(*run)
+    cluster_rows, split_rows, missing = load_inputs(*run)
+    assert missing == {"no classify result": ["0001", "0002", "0003"]}
+    assert cluster_rows[0].final_domain == "s0001.example"
     assert [r.site_id for r in cluster_rows] == ["0001", "0002", "0003"]
     assert [r.judgeable for r in cluster_rows] == [True, True, False]
     assert len({r.dom_hash for r in cluster_rows}) == 1
@@ -253,6 +275,11 @@ def test_command_writes_split_once(
     out = run_dir.parent.parent / "split.jsonl"
     args = ["--manifest", str(manifest), "--out", str(out)]
 
+    # The fixture's checkpoint is empty, so every site lacks a classify result: refused.
+    assert split_module.main(args) == 1
+    assert not out.exists()
+    assert "no classify result" in capsys.readouterr().err
+    args.append("--allow-incomplete")
     assert split_module.main(args) == 0
     lines = [json.loads(x) for x in out.read_text().splitlines()]
     cluster_of = {x["site_id"]: x["cluster_id"] for x in lines}

@@ -111,8 +111,30 @@ def load_sites(path: Path, id_width: int = 3) -> list[Site]:
 # ============================================================
 
 
-async def run_triage(settings: Settings, sites: list[Site], out_dir: Path) -> list[TriageRecord]:
-    """Probe every site through the egress proxy; write triage.jsonl in input order."""
+async def run_triage(
+    settings: Settings, sites: list[Site], out_dir: Path, new_only: bool = False
+) -> list[TriageRecord]:
+    """Probe every site through the egress proxy; write triage.jsonl in input order.
+
+    `new_only` (dataset batches, DESIGN §8.2): sites that already have a line in triage.jsonl
+    are not contacted again and keep their result; only the others are probed, and the file
+    then holds both, in site-id order. Returns the newly probed records."""
+    path = out_dir / "triage.jsonl"
+    earlier: dict[str, TriageRecord] = {}
+    if new_only and path.exists():
+        for line in path.read_text().splitlines():
+            record = TriageRecord.model_validate_json(line)
+            earlier[record.site.site_id] = record
+        for site in sites:
+            known = earlier.get(site.site_id)
+            if known is not None and known.site.url != site.url:
+                raise ValueError(
+                    f"site {site.site_id} is {site.url} but triage.jsonl has {known.site.url}: "
+                    "the URL file's lines moved; ids must stay fixed"
+                )
+        sites = [s for s in sites if s.site_id not in earlier]
+        print(f"{len(earlier)} sites already checked are kept; {len(sites)} new to check")
+
     proxy = require_egress_proxy()
     semaphore = asyncio.Semaphore(settings.triage.concurrency)
     verified = make_client(proxy, settings.http, settings.triage, verify=True)
@@ -128,7 +150,8 @@ async def run_triage(settings: Settings, sites: list[Site], out_dir: Path) -> li
         records = await asyncio.gather(*(one(site) for site in sites))
 
     assert len(records) == len(sites), "triage must produce exactly one record per URL"
-    write_jsonl(out_dir / "triage.jsonl", records)
+    merged = earlier | {r.site.site_id: r for r in records}
+    write_jsonl(path, [merged[k] for k in sorted(merged)] if new_only else records)
     return records
 
 

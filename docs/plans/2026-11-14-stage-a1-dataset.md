@@ -415,8 +415,9 @@ No code. Run from the merged branch; record every count and dollar figure in LOG
   per source and skip counts. Downloads files from the four provider hosts only.
 - [ ] **2. First batch:** `python -m eval.dataset_v1.sample --batch 1`; commit `urls.txt` and
   `manifest.jsonl`.
-- [ ] **3. Liveness:** `make triage RUN_ID=dataset-v1 ARGS="--urls data/dataset/v1/urls.txt"`
-  (selftest runs first). Record status counts per source. Repeat steps 2 and 3 with further
+- [ ] **3. Liveness:** `make triage RUN_ID=dataset-v1 ARGS="--urls data/dataset/v1/urls.txt
+  --new-only"` (selftest runs first; `--new-only` keeps earlier batches' results and checks
+  only the new sites). Record status counts per source. Repeat steps 2 and 3 with further
   batches until quotas are met or 4,000 checks are used. If DFPI yields fewer than 20 live
   sites, stop and ask the user (§8.1 expected 40 to 80).
 - [ ] **4. Capture:** `make capture RUN_ID=dataset-v1 ARGS="--urls … --only <ids within quota>"`,
@@ -428,9 +429,11 @@ No code. Run from the merged branch; record every count and dollar figure in LOG
 - [ ] **7. Cluster and split:** `python -m eval.dataset_v1.split`; commit
   `data/dataset/v1/split.jsonl`; record cluster count, largest cluster, and scam/legitimate
   counts per split. If any cluster holds more than 15% of the sites, stop and inspect it before
-  going on.
-- [ ] **8. Review (the user):** `make review RUN=dataset-v1`, then work through the review
-  queue, editing `verdict` and setting `reviewed_by=alex` in `eval/dataset_v1/labels.csv`.
+  going on. The command refuses to run while sites lack a label or a classify result: rerun
+  step 5 or 6 first.
+- [ ] **8. Review (the user):** `python -m eval.dataset_v1.labels --build`, then `--queue`
+  (commit `labels.csv` and `data/dataset/v1/review_queue.jsonl`); `make review
+  RUN=dataset-v1`, then work through the review queue, editing `verdict` and setting `reviewed_by=alex` in `eval/dataset_v1/labels.csv`.
 - [ ] **9. Agreement:** `python -m eval.dataset_v1.labels --agreement`; record the rates.
 - [ ] **10. Agent funnel:** `make run RUN_ID=dataset-v1-agent ARGS="--urls … --only <≤40 ids>
   --triage-from dataset-v1 --force-navigation --spend-cap 15"`, then

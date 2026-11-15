@@ -1,7 +1,8 @@
 """The dataset's labels file, the human review queue and the agreement report (DESIGN §8.4).
 
     python -m eval.dataset_v1.labels --build       # write or refresh eval/dataset_v1/labels.csv
-    python -m eval.dataset_v1.labels --queue       # site ids to review, test split first
+    python -m eval.dataset_v1.labels --queue       # site ids to review, test split first;
+                                                   # saved to data/dataset/v1/review_queue.jsonl
     python -m eval.dataset_v1.labels --agreement   # how often review changed the labeller's verdict
 
 Every row starts as the labeller's draft: `verdict` equals `labeller_verdict` and
@@ -12,6 +13,7 @@ reviewed row, so it is safe to rerun after the labeller retries its errors."""
 import argparse
 import csv
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -24,6 +26,7 @@ from scamhunter.labeller import LabellerVerdict, latest_verdicts
 from scamhunter.models import SiteResult
 
 LABELS_PATH = REPO_ROOT / "eval" / "dataset_v1" / "labels.csv"
+QUEUE_PATH = REPO_ROOT / "data" / "dataset" / "v1" / "review_queue.jsonl"
 COLUMNS = [
     "url",
     "verdict",
@@ -110,17 +113,39 @@ def review_queue(rows: list[dict], pipeline_verdicts: dict[str, str]) -> list[st
     return parts["test"] + parts["dev_disagreement"] + parts["dev_sample"]
 
 
-def agreement(rows: list[dict], pipeline_verdicts: dict[str, str]) -> dict[str, dict]:
-    """Per queue part: rows reviewed so far, how many the reviewer changed, and the rate. The
-    dev disagreement rows are reported apart from the random dev sample, because they were
-    picked for disagreeing and would make the labeller look worse than it is."""
+def freeze_queue(
+    rows: list[dict], pipeline_verdicts: dict[str, str], saved: dict[str, str]
+) -> dict[str, str]:
+    """site_id -> why it is queued ("test", "dev_disagreement" or "dev_sample").
+
+    The first call draws the queue. Later calls keep every saved entry as it is and only add
+    test rows and dev disagreements that are new (a labeller error that was retried, say). The
+    random sample is never drawn again: drawing it from a population that has changed by even
+    one site would pick a different 20%, and the reviewed sample would vanish from the
+    agreement figures."""
+    parts = _queue_parts(rows, pipeline_verdicts)
+    if not saved:
+        return {s: part for part, site_ids in parts.items() for s in site_ids}
+    known = {r["site_id"] for r in rows}
+    queue = {s: part for s, part in saved.items() if s in known}
+    for part in ("test", "dev_disagreement"):
+        for site_id in parts[part]:
+            queue.setdefault(site_id, part)
+    return queue
+
+
+def agreement(rows: list[dict], queue: dict[str, str]) -> dict[str, dict]:
+    """Per queue part: rows queued, rows reviewed so far, how many the reviewer changed, and
+    the rate. The dev disagreement rows are reported apart from the random dev sample, because
+    they were picked for disagreeing and would make the labeller look worse than it is."""
     by_id = {r["site_id"]: r for r in rows}
     out = {}
-    for part, site_ids in _queue_parts(rows, pipeline_verdicts).items():
-        reviewed = [by_id[s] for s in site_ids if is_reviewed(by_id[s])]
+    for part in ("test", "dev_disagreement", "dev_sample"):
+        queued = [by_id[s] for s, why in sorted(queue.items()) if why == part and s in by_id]
+        reviewed = [r for r in queued if is_reviewed(r)]
         changed = sum(r["verdict"] != r["labeller_verdict"] for r in reviewed)
         out[part] = {
-            "queued": len(site_ids),
+            "queued": len(queued),
             "reviewed": len(reviewed),
             "changed": changed,
             "rate": changed / len(reviewed) if reviewed else None,
@@ -139,10 +164,33 @@ def read_csv(path: Path) -> list[dict]:
 
 
 def write_csv(path: Path, rows: list[dict]) -> None:
-    with path.open("w", newline="") as f:
+    """Written to a temporary file first and swapped in only when complete, so a row the
+    writer rejects (an extra column added in a spreadsheet, say) cannot empty the file."""
+    extra = sorted({str(k) for r in rows for k in r if k not in COLUMNS})
+    if extra:
+        raise SystemExit(
+            f"error: {path} has columns this tool does not know: {extra}. Nothing was written; "
+            "remove them (or move the text into `notes`) and run again."
+        )
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
+    os.replace(tmp, path)
+
+
+def read_queue(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    entries = (json.loads(line) for line in path.read_text().splitlines() if line)
+    return {e["site_id"]: e["part"] for e in entries}
+
+
+def write_queue(path: Path, queue: dict[str, str]) -> None:
+    order = {"test": 0, "dev_disagreement": 1, "dev_sample": 2}
+    ordered = sorted(queue.items(), key=lambda kv: (order[kv[1]], kv[0]))
+    path.write_text("".join(json.dumps({"site_id": s, "part": p}) + "\n" for s, p in ordered))
 
 
 def load_split(path: Path) -> dict[str, dict]:
@@ -169,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--labels", type=Path, default=LABELS_PATH)
     parser.add_argument("--manifest", type=Path, default=MANIFEST_PATH)
     parser.add_argument("--split", type=Path, default=SPLIT_PATH)
+    parser.add_argument("--queue-file", type=Path, default=QUEUE_PATH)
     args = parser.parse_args(argv)
     run_dir = REPO_ROOT / "runs" / args.run_id
 
@@ -189,22 +238,31 @@ def main(argv: list[str] | None = None) -> int:
     if not rows:
         print(f"error: {args.labels} missing or empty; run with --build first", file=sys.stderr)
         return 1
-    verdicts = pipeline_verdicts(run_dir)
+    saved = read_queue(args.queue_file)
     if args.queue:
-        queue = review_queue(rows, verdicts)
-        reviewed = {r["site_id"] for r in rows if is_reviewed(r)}
-        todo = [s for s in queue if s not in reviewed]
-        (run_dir / "review_queue.txt").write_text("\n".join(queue) + "\n")
-        print(f"{len(queue)} sites in the queue, {len(todo)} not yet reviewed:")
+        queue = freeze_queue(rows, pipeline_verdicts(run_dir), saved)
+        write_queue(args.queue_file, queue)
+        todo = [s for s in read_queue(args.queue_file) if not is_reviewed(by_id(rows)[s])]
+        print(
+            f"{len(queue)} sites in the queue ({len(queue) - len(saved)} added now), "
+            f"{len(todo)} not yet reviewed → {args.queue_file}"
+        )
         print(",".join(todo))
         return 0
-    for part, figures in agreement(rows, verdicts).items():
+    if not saved:
+        print(f"error: {args.queue_file} missing; run with --queue first", file=sys.stderr)
+        return 1
+    for part, figures in agreement(rows, saved).items():
         rate = "n/a" if figures["rate"] is None else f"{figures['rate']:.0%}"
         print(
             f"{part:<17} queued {figures['queued']:>4}  reviewed {figures['reviewed']:>4}  "
             f"changed {figures['changed']:>4}  rate {rate}"
         )
     return 0
+
+
+def by_id(rows: list[dict]) -> dict[str, dict]:
+    return {r["site_id"]: r for r in rows}
 
 
 if __name__ == "__main__":
