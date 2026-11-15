@@ -1333,3 +1333,17 @@ One sample per provider was downloaded on the host from the provider's own site 
   - The prompt also gets the final URL. The plan's list left it out, but phishing cannot be judged without the domain. The source's note (DFPI narrative) is wrapped as untrusted along with the page text and title.
   - `label_run` has two keyword arguments the plan's signature did not: `model` (for the cost estimate) and `concurrency`.
 - [limit] Costs are estimates at list price, not billing; the gateway usage log figure printed after each run is the one to record.
+
+## 2026-11-15 · H+? · DECISION [arch] (user): clusters and the dev/test split (plan Task 8)
+- `eval/dataset_v1/cluster.py` (union-find over domain, address and page-structure links) and `split.py` (`python -m eval.dataset_v1.split`). Four choices the user made in a dialog:
+  - **Label before split.** Sites the labeller calls `excluded` or `error` take no structure link, so domains parked with the same parking company (identical pages) cannot fuse into one giant cluster. Runbook steps 6 and 7 swapped in the plan. Rejected [alt]: keep the order and judge "judgeable" from the pipeline, which counts a parked page as live content.
+  - **The split is saved to `data/dataset/v1/split.jsonl` and committed**; Task 9 copies it into `labels.csv`. The command refuses to overwrite it without `--force` (§8.5: made once). Rejected [alt]: recompute it inside Task 9.
+  - **"A third" counts sites, not clusters.** Scores are per site. One big cluster can push test a little over a third. Rejected [alt]: counting clusters, as the plan's wording read.
+  - **A cluster with any scam-list member is a scam cluster**, even if it also holds a legitimate-list site (a phishing copy sharing the real site's structure). The command prints these mixed clusters. Rejected [alt]: never let a structure match join scam and legitimate sites, which could put a real site and its clone on opposite sides.
+- My calls, within §8.5:
+  - Addresses for links are the primary-tier ones from the classify checkpoint. Low-confidence ones (seen only in a JS bundle) are left out, as they may be library constants.
+  - The structure hash is sha256 of the opening-tag names in order, ignoring text and attributes, so two copies of one kit with different brand names match. Under 30 tags: no hash.
+  - Undated scam clusters with any DFPI member go to the DFPI random draw; the rest (MetaMask blocklist only) go to dev. A legitimate cluster that holds several sources is drawn with the source that comes first in the sampler's `PRIORITY`.
+  - Random draws use the same sites-based third as the time split, so all groups follow one rule. One `random.Random(20261114)` is used, with groups drawn in a fixed order (DFPI, then legitimate sources in `PRIORITY` order) and cluster ids sorted before shuffling.
+  - Cluster ids (`c0001`…) are numbered by each cluster's smallest site id, so the same input always gives the same ids.
+- [limit] Clustering is only as good as its three links. Sibling sites on different kits with different addresses stay apart, so some leakage between dev and test is possible; added to DESIGN §8.8.

@@ -83,7 +83,7 @@ Task 1 writes these into §8.2 and LOG.md before any code.
 | `tests/test_dataset_*.py`, `tests/fixtures/dataset/` | Unit tests and small hand-made fixtures |
 
 Data paths: `data/dataset/sources/` (raw, ignored), `data/dataset/candidates.jsonl` (ignored),
-`data/dataset/v1/urls.txt` and `manifest.jsonl` (committed), `runs/dataset-v1/` (ignored),
+`data/dataset/v1/urls.txt`, `manifest.jsonl` and `split.jsonl` (committed), `runs/dataset-v1/` (ignored),
 `eval/dataset_v1/labels.csv` (committed).
 
 ---
@@ -423,10 +423,12 @@ No code. Run from the merged branch; record every count and dollar figure in LOG
   at most 500 sites.
 - [ ] **5. Classify:** `make classify RUN=dataset-v1 ARGS="--urls … --spend-cap 25"`. Check
   the cost after the first 10 sites before letting it finish.
-- [ ] **6. Cluster and split:** `python -m eval.dataset_v1.split`; record cluster count,
-  largest cluster, and scam/legitimate counts per split. If any cluster holds more than 15% of
-  the sites, stop and inspect it before going on.
-- [ ] **7. Label:** `make label RUN=dataset-v1 ARGS="--spend-cap 40"`.
+- [ ] **6. Label:** `make label RUN=dataset-v1 ARGS="--spend-cap 40"`. (Before the split since
+  2026-11-15: the split needs the labeller's `excluded` calls.)
+- [ ] **7. Cluster and split:** `python -m eval.dataset_v1.split`; commit
+  `data/dataset/v1/split.jsonl`; record cluster count, largest cluster, and scam/legitimate
+  counts per split. If any cluster holds more than 15% of the sites, stop and inspect it before
+  going on.
 - [ ] **8. Review (the user):** `make review RUN=dataset-v1`, then work through the review
   queue, editing `verdict` and setting `reviewed_by=alex` in `eval/dataset_v1/labels.csv`.
 - [ ] **9. Agreement:** `python -m eval.dataset_v1.labels --agreement`; record the rates.

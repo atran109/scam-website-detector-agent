@@ -1362,6 +1362,16 @@ address, or the same page-structure hash (a hash of the DOM tag skeleton of the 
 This is a small first version of the Stage B operator clustering and lives in
 `eval/dataset_v1/cluster.py`, outside the pipeline.
 
+- **Addresses** are the primary-tier addresses from the classify checkpoint (known token
+  contracts are already dropped by the extractor's blocklist).
+- **Structure hash:** sha256 of the landing page's opening-tag sequence. Pages with fewer than
+  30 tags get none, and sites the labeller called `excluded` or `error` take no structure link,
+  because parked, blank and block pages look alike across unrelated domains. So the labeller
+  runs before the split.
+- A cluster with any scam-list member counts as a scam cluster, even if it also holds a site
+  from a legitimate list (a phishing copy sharing the real site's structure); the split command
+  prints such clusters.
+
 - **Scam clusters with a listing date** (ScamSniffer): sorted by earliest listing date; the
   newest go to test until test holds about a third of them. This gives the time split.
 - **Scam clusters without a date:** DFPI clusters are split by a seeded random draw, one third
@@ -1369,7 +1379,11 @@ This is a small first version of the Stage B operator clustering and lives in
 - **Legitimate sites:** seeded random draw per source, one third to test.
 - A cluster that mixes dated and undated sites follows its dated members.
 
-The split is made once, written to the labels file and committed. Thresholds, prompts and
+"A third" counts sites, not clusters, for both the time split and the random draws: clusters
+are taken in order (newest first, or shuffled) while test holds under a third of that group's
+sites, so one big cluster can push test a little over. The split is made once by
+`python -m eval.dataset_v1.split`, written to `data/dataset/v1/split.jsonl` (site, cluster,
+side; it refuses to overwrite without `--force`), committed, and copied into the labels file. Thresholds, prompts and
 weights are tuned on dev only.
 
 ### 8.6 Limits and budget
@@ -1397,4 +1411,6 @@ each source and its licence.
 - The labeller and the classifier are models from the same family. Human review of the whole
   test split is what the reported numbers rest on.
 - One reviewer, no second opinion.
+- Clusters see only three links. Sibling sites built on different kits with different
+  addresses stay apart, so some leakage between dev and test remains possible.
 - Each scam site contacted sees the home IP once (§5.6).
