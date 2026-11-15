@@ -87,10 +87,14 @@ optimistic than the first draft.
 The stage to finish before anything else: it is enough to put on a resume.
 
 **A0. Public-ready (≈4 h)**
-- Fix the name (README says both "Ferret" and "Furret"); add a LICENSE (MIT or Apache-2.0).
-- GitHub Actions: `make check` on every push and PR, with the browser suite as a second job.
-- Before going public: scan tracked files for personal data, the home IP and secrets; decide
-  whether scam URLs are shown defanged (`hxxps://example[.]com`).
+- [x] Name fixed to Ferret; MIT LICENSE added (2026-11-14, LOG).
+- [x] GitHub Actions: `make check` on every push to main and every PR, with the browser suite
+  as a second job. First run on GitHub still to be confirmed.
+- [x] Tracked files scanned for personal data, the home IP and secrets: nothing found. Commit
+  author emails are part of the history and become visible when the repo is public.
+- [x] Scam URLs stay as they are in the data files; defanged only where people read them
+  (README examples, the dashboard).
+- [ ] Flip the repository to public (the user's step, on GitHub).
 - Work on branches with PRs from here on.
 
 **A1. Labeled dataset (≈12 h)**
@@ -244,8 +248,6 @@ Independent items; do the ones that fit the roles being interviewed for.
 
 ## 9. Still open
 
-1. **License:** MIT or Apache-2.0 (Stage A0).
-2. **Dataset sources** for positives and negatives, pending each one's terms (Stage A1).
-3. **Defanged URLs** in the public repo's data files, or only on the dashboard (Stage A0).
-4. **Hosting:** a cloud VM or local with published snapshots (decided at Stage B4).
-5. **Which Stage C items**, decided after Stage B by target role.
+1. **Dataset sources** for positives and negatives, pending each one's terms (Stage A1).
+2. **Hosting:** a cloud VM or local with published snapshots (decided at Stage B4).
+3. **Which Stage C items**, decided after Stage B by target role.
