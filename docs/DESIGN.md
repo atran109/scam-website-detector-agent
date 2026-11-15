@@ -1109,7 +1109,7 @@ A rejected action is fed back to the model as a tool error, so it can choose som
 | **Browser** | Chromium sandbox **on** (`chromium_sandbox=True`; Playwright's default adds `--no-sandbox`), verified inside the container by `make selftest` (renderers run seccomp-filtered in their own user namespace); fresh context per site; downloads denied; permissions denied (notifications, camera, mic, geolocation, clipboard read); no extensions; non-http(s) schemes aborted via routing; service workers blocked; popups captured and closed | Drive-by downloads, persistence, cross-site leakage |
 | **Application** | Action whitelist; same-domain `goto`; identity placeholders; payment and sign actions blocked; per-site budgets | Agent doing something harmful or costly |
 | **LLM** | Page content wrapped in delimited "untrusted data" blocks (`sanitize.py`); system prompt says to ignore embedded instructions; structured outputs validated by Pydantic; LLM output never executed as code | Prompt injection steering the classifier or agent |
-| **Secrets** | API key only in `.env` (gitignored), loaded only into the `llm-gateway` container, never the crawler. The gateway sits on the internal network and reaches only `api.anthropic.com` (Squid port 3129); it chooses the model by role, rejects server tools/MCP/containers, caps `max_tokens`, caches responses and logs token usage without content. Never written to logs or traces; synthetic credentials stored per site for reproducibility | Key leakage; a compromised crawler using the API as an egress channel |
+| **Secrets** | API key only in `.env` (gitignored), loaded only into the `llm-gateway` container, never the crawler. The gateway sits on the internal network and reaches only `api.anthropic.com` (Squid port 3129); it chooses the model by role (`judge`, `helper`, `navigator`, and from 2026-11-14 `labeller`, §8.2), rejects server tools/MCP/containers, caps `max_tokens`, caches responses and logs token usage without content. Never written to logs or traces; synthetic credentials stored per site for reproducibility | Key leakage; a compromised crawler using the API as an egress channel |
 
 #### 5.6.0 Mock mode (`--mock`, decided 2026-10-05)
 
@@ -1305,8 +1305,17 @@ A source's listing is a *lead*, not a label. Labels come from the captured evide
    site. Evidence is saved once under `runs/dataset-v1/` and never refreshed for evaluation.
 4. **Label and split** (§8.4, §8.5).
 
-The CLI gains one option, `--urls <file>`, so `triage`, `capture` and `classify` can read the
-dataset's URL file instead of the fixed `data/urls.txt`. No other pipeline code changes.
+Changes to the pipeline (amended 2026-11-14 after reading the code; LOG):
+
+- **`--urls <file>`** on `triage`, `capture`, `classify`, `rescore` and `run`, so they can read
+  the dataset's URL file instead of the fixed `data/urls.txt`. Files passed this way get
+  four-digit site ids (three digits would overflow at 4,000 lines); `data/urls.txt` keeps three.
+- **`--spend-cap` on `classify`**, which had none.
+- **A `labeller` role in the LLM gateway** (§5.6), mapped to `llm.labeller_model`. The gateway
+  chooses the model by role, and the labeller needs a stronger model than the judge. The new
+  role is subject to the same request whitelist as the other three.
+- **A `label` command** that runs the labeller pass (§8.4) in the crawler container, with the
+  gateway only (no site visits).
 
 ### 8.3 Agent funnel subset
 

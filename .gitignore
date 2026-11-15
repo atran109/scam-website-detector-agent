@@ -19,3 +19,10 @@ dist/
 
 # Personal review notes (not part of the repo)
 docs/STUDY_GUIDE.md
+
+# Stage A1 dataset: providers' raw lists are inputs, not republished (DESIGN §8.7)
+data/dataset/sources/
+data/dataset/candidates.jsonl
+
+# Plan-execution scratch
+.superpowers/
