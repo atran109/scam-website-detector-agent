@@ -210,7 +210,7 @@ def cmd_classify(args: argparse.Namespace) -> int:
         print(f"error: runs/{args.run_id} has no triage.jsonl", file=sys.stderr)
         return 1
     usage_from = count_lines()
-    results = asyncio.run(classify_from_evidence(settings, sites, out))
+    results = asyncio.run(classify_from_evidence(settings, sites, out, args.spend_cap))
     usage = _report_gateway_usage(out, usage_from, {s.site_id for s in sites})
     _finalize(results, settings, args.run_id, usage.model_dump())
     return 0
@@ -421,6 +421,9 @@ def main(argv: list[str] | None = None) -> int:
         "rescore", help="re-classify a run from saved evidence (no visits)"
     )
     rescore_parser.add_argument("--run-id", required=True)
+    classify.add_argument(
+        "--spend-cap", type=float, help="stop judging at this estimated spend in USD"
+    )
     for command in (triage, run, capture, classify, rescore_parser):
         command.add_argument(
             "--urls", help="URL file to use instead of data/urls.txt (four-digit site ids)"

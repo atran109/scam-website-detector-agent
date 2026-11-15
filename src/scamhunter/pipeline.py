@@ -1127,23 +1127,33 @@ def original_triage(run_dir: Path) -> dict[str, TriageResult]:
 
 
 async def classify_from_evidence(
-    settings: Settings, sites: list[Site], run_dir: Path
+    settings: Settings, sites: list[Site], run_dir: Path, spend_cap_usd: float | None = None
 ) -> list[SiteResult]:
     """Judge every site from the evidence a run saved, with no checkpoint needed: for a
     capture-only run (`scamhunter capture`), which saved snapshots and no verdicts. Sites with
     no snapshots (dead, or not captured) take the dead-site policy without Wayback. Nothing is
     visited and the navigation agent does not run; the checkpoint written here lets `rescore`,
-    `report` and `review` work on the run afterwards."""
+    `report` and `review` work on the run afterwards.
+
+    `spend_cap_usd` stops new judgments once the estimated spend reaches it (every token priced
+    as the judge model, so the estimate errs high). Sites in flight finish, so the overshoot is
+    at most `concurrency - 1` sites. Running the command again continues: finished sites are
+    answered from the gateway's response cache at no cost."""
     triage = load_triage(run_dir / "triage.jsonl")
     llm = LLMClient(settings.llm.gateway_url)
     ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm)
     semaphore = asyncio.Semaphore(settings.run.concurrency)
+    spent_usd = 0.0
 
-    async def one(site: Site) -> SiteResult:
+    async def one(site: Site) -> SiteResult | None:
+        nonlocal spent_usd
         started = datetime.now(UTC)
         async with semaphore:
+            if spend_cap_usd is not None and spent_usd >= spend_cap_usd:
+                return None
             snapshots = load_snapshots(ctx.site_dir(site))
             analysis = await analyze(ctx, site, triage[site.site_id], snapshots)
+            spent_usd += analysis.usage.cost_usd(settings.llm.judge_model)
         capture_file = ctx.site_dir(site) / "capture.json"
         notes = json.loads(capture_file.read_text())["notes"] if capture_file.exists() else []
         print(
@@ -1162,10 +1172,17 @@ async def classify_from_evidence(
             trace_path=None,
         )
 
-    results = await asyncio.gather(*(one(s) for s in sites if s.site_id in triage))
+    outcomes = await asyncio.gather(*(one(s) for s in sites if s.site_id in triage))
     await llm.aclose()
+    results = [r for r in outcomes if r is not None]
+    if len(results) < len(outcomes):
+        print(
+            f"\n{len(outcomes) - len(results)} sites not classified: spend cap of "
+            f"${spend_cap_usd:.2f} reached (estimated ${spent_usd:.2f} spent). "
+            "Run the same command again with a higher cap to continue."
+        )
     write_jsonl(run_dir / "checkpoint.jsonl", results)
-    return list(results)
+    return results
 
 
 async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[SiteResult]:

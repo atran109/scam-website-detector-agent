@@ -15,7 +15,7 @@ import random
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from eval.dataset_v1.models import SCAM_SOURCES, Candidate, ManifestRow, Source
+from eval.dataset_v1.models import Candidate, ManifestRow, Source
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CANDIDATES_PATH = REPO_ROOT / "data" / "dataset" / "candidates.jsonl"
@@ -241,7 +241,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(manifest) + len(rows)} of {MAX_CHECKS} liveness checks used.")
     if not rows:
         print("Nothing added: every quota is met, or the check cap is reached.")
-    assert SCAM_SOURCES  # sources are named in models.py; kept in one place
     return 0
 
 
