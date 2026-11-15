@@ -21,7 +21,7 @@ import anthropic
 from anthropic import DefaultHttpxClient
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from scamhunter.config import load_settings
+from scamhunter.config import Settings, load_settings
 
 log = logging.getLogger("llm-gateway")
 
@@ -29,7 +29,12 @@ MAX_TOKENS_CAP = 16_000
 # Per-request API timeout (seconds) and SDK retries by role. A navigator step normally answers
 # in ~4 s; one request hung ~10 min on the SDK's 600 s default (2026-10-06), so navigator calls
 # fail fast and the agent loop counts a failed step instead of waiting.
-REQUEST_LIMITS = {"navigator": (60.0, 2), "judge": (300.0, 3), "helper": (120.0, 3)}
+REQUEST_LIMITS = {
+    "navigator": (60.0, 2),
+    "judge": (300.0, 3),
+    "helper": (120.0, 3),
+    "labeller": (300.0, 3),  # dataset labelling pass (DESIGN §8.4); same rules as the judge
+}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Models that accept fallbacks="default" (refusal re-run server-side); Haiku 4.5 does not.
 FALLBACK_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5")
@@ -52,7 +57,7 @@ class MessagesRequest(_Strict):
 
 
 class GatewayRequest(_Strict):
-    role: Literal["judge", "helper", "navigator"]
+    role: Literal["judge", "helper", "navigator", "labeller"]
     site_id: str
     purpose: str
     request: MessagesRequest
@@ -89,14 +94,20 @@ def cache_key(model: str, request: MessagesRequest) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def role_models(settings: Settings) -> dict[str, str]:
+    """The model each role is served by. Callers name a role, never a model."""
+    return {
+        "judge": settings.llm.judge_model,
+        "helper": settings.llm.helper_model,
+        "navigator": settings.llm.navigator_model,
+        "labeller": settings.llm.labeller_model,
+    }
+
+
 class Gateway:
     def __init__(self, cache_dir: Path) -> None:
         settings = load_settings()
-        self.models = {
-            "judge": settings.llm.judge_model,
-            "helper": settings.llm.helper_model,
-            "navigator": settings.llm.navigator_model,
-        }
+        self.models = role_models(settings)
         self.cache_enabled = settings.llm.cache_responses
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)

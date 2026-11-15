@@ -1313,3 +1313,9 @@ One sample per provider was downloaded on the host from the provider's own site 
 - **CoinGecko** `/api/v3/exchanges`: works without a key and each record has `url`. The stop condition in the plan did not trigger.
 - **Decisions in the parsers:** entries are deduplicated by registrable domain, first one wins; private suffixes count (two sites on `pages.dev` are two domains), which differs from the pipeline's own extractor; IP addresses and non-public names are skipped and counted; a file in an unexpected shape gives an empty result with a reason instead of an error. Test fixtures use invented `.example` names.
 - `pyproject.toml`: pytest `pythonpath = ["."]` so tests can import `eval.dataset_v1`.
+
+## 2026-11-15 00:08 · H+? · DECISION [arch] (user): labeller model is Claude Opus 5.5
+- The dataset labeller (DESIGN §8.4) runs on `claude-opus-5-5` through a new gateway role, `labeller`. Model id and list prices ($4 in / $20 out per million tokens) were read from the current Claude API reference, not from memory; the price entry was already in `llm/client.py`.
+- Rejected [alt]: Claude Fable 5.2 ($8 / $40): about twice the cost, an estimated $45 for 450 sites against the $40 labelling cap, and it would need refusal handling the gateway does not have for that model.
+- [limit] Opus 5.5 and the judge's Sonnet 5.5 are the same model family; DESIGN §8.8 already lists this.
+- The `labeller` role is subject to the same request whitelist as the other roles (tested: server tools and unknown `output_config` keys are still rejected).

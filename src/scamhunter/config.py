@@ -60,6 +60,7 @@ class LLMSettings(_Section):
     judge_model: str
     navigator_model: str
     helper_model: str
+    labeller_model: str  # dataset labelling pass (DESIGN §8.4); stronger than the judge
     judge_effort: Literal["low", "medium", "high", "xhigh", "max"]
     gateway_url: str
     cache_responses: bool
