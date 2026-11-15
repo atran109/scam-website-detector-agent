@@ -1303,3 +1303,13 @@ Read from each source's own pages (GitHub READMEs, terms pages, docs); no lists 
 ## 2026-11-14 23:55 · H+? · DECISION [arch] (user): Stage A1 plan approved, with three additions to DESIGN §8
 - The user approved `docs/plans/2026-11-14-stage-a1-dataset.md` and chose to build it in one session with a single review at the end. This amends the 23:47 entry's "`--urls` as the only pipeline change": DESIGN §8.2 now lists `--urls` with four-digit ids, `classify --spend-cap`, a `labeller` gateway role (§5.6) and a `label` command.
 - `data/dataset/sources/` and `candidates.jsonl` are gitignored; the sources folder is also kept out of the Docker build context.
+
+## 2026-11-15 00:02 · H+? · FINDING: provider list formats confirmed; parsers written (plan Task 3)
+One sample per provider was downloaded on the host from the provider's own site (user approved), into the gitignored `data/dataset/sources/samples/`.
+- **ScamSniffer** daily archive file: `{"domains": [...]}`; the 2026-11-01 file has 81 entries (76 usable), so 60 days is roughly 4,500 candidates. It contains `.invalid` probe entries, which the parser skips.
+- **MetaMask** `src/config.json`: keys are `blacklist` (121,553 entries, 114,844 usable distinct domains) and `whitelist` (59 entries, 53 usable), not "blocklist"/"allowlist". [limit] The whitelist is small, so its quota of 30 is most of it.
+- **DFPI**: one HTML table, 645 rows, 609 with a website; 773 distinct scam domains (95 given with a path, which is kept), 74 with a crypto address in the narrative, and 50 legitimate look-alike domains named after "not to be confused with". [limit] The look-alike extraction is a regex over prose and can pick up a wrong name; labels come from evidence, so a wrong lead costs one capture.
+- **Tranco**: `rank,domain` CSV. [limit] The top ranks include infrastructure domains with no website (`amazonaws.com`, `fbcdn.net`); the liveness check and the `excluded` label absorb them.
+- **CoinGecko** `/api/v3/exchanges`: works without a key and each record has `url`. The stop condition in the plan did not trigger.
+- **Decisions in the parsers:** entries are deduplicated by registrable domain, first one wins; private suffixes count (two sites on `pages.dev` are two domains), which differs from the pipeline's own extractor; IP addresses and non-public names are skipped and counted; a file in an unexpected shape gives an empty result with a reason instead of an error. Test fixtures use invented `.example` names.
+- `pyproject.toml`: pytest `pythonpath = ["."]` so tests can import `eval.dataset_v1`.
