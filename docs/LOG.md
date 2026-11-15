@@ -1347,3 +1347,16 @@ One sample per provider was downloaded on the host from the provider's own site 
   - Random draws use the same sites-based third as the time split, so all groups follow one rule. One `random.Random(20261114)` is used, with groups drawn in a fixed order (DFPI, then legitimate sources in `PRIORITY` order) and cluster ids sorted before shuffling.
   - Cluster ids (`c0001`…) are numbered by each cluster's smallest site id, so the same input always gives the same ids.
 - [limit] Clustering is only as good as its three links. Sibling sites on different kits with different addresses stay apart, so some leakage between dev and test is possible; added to DESIGN §8.8.
+
+## 2026-11-15 · H+? · DECISION [arch] (user): labels file, review queue, agreement, funnel, evaluate filters (plan Task 9)
+- `eval/dataset_v1/labels.py`, `funnel.py`; `eval/evaluate.py --split --reviewed-only`. Two choices the user made in a dialog:
+  - **"Reached registration"** = registered, typed into at least one form field, or stopped at a sign-up gate (invite code, SMS, email check, CAPTCHA, KYC). The agent records no such field. Rejected [alt]: registered only, which would make two funnel steps the same number.
+  - **`excluded` drafts count as disagreements**, so excluded dev sites go to human review, as the plan says. A wrong `excluded` would silently drop a site from scoring. Rejected [alt]: reach them only through the 20% sample.
+- My calls, within the plan:
+  - **`--build` merges:** a rebuild refreshes unreviewed rows and keeps every reviewed row exactly as it is (including its `labeller_verdict`, so agreement is measured against the draft the reviewer saw). Safe to rerun after the labeller retries errors.
+  - **Agreement is reported in three parts** (test, dev disagreements, random dev sample), not two. The disagreement rows were picked for disagreeing, so mixing them into the dev rate would make the labeller look worse than it is. So `agreement` also takes the pipeline verdicts. That differs from the plan's `agreement(rows)`.
+  - **`build_labels(manifest, labeller, split)`** reads the clusters and split from `split.jsonl` (Task 8) and does not take pipeline results. Pre-filling `expected_addresses` from the pipeline would make the address evaluation circular, so it is left for the reviewer.
+  - A new row has `labeled_by=labeller`. A site in the split with no labeller line gets `error`, so it is queued.
+  - **Funnel:** "reviewed" means `reviewed_by` is not `none`, rather than literally `alex`. The account trigger is the agent's own, moved out of `should_navigate` into `account_trigger` with no behaviour change. It counts addresses of every tier, as the pipeline does. Picks go DFPI first, then the sampler's `PRIORITY` order, then site id.
+  - **`tally`** takes (navigation trace, primary addresses) pairs instead of whole results, which keeps tests small. **`dfpi_address_check`** compares EVM addresses case-insensitively and every other format exactly.
+  - **The review queue** is printed and written to `runs/<id>/review_queue.txt` (not committed; it can be regenerated from the seed).

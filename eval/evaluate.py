@@ -2,6 +2,7 @@
 
     python eval/evaluate.py runs/<id>/output/results.json [--labels eval/labels.csv]
                             [--thresholds 0.45 0.5] [--labeled-by alex] [--json out.json]
+                            [--split dev|test] [--reviewed-only]   (dataset labels, §8.4)
 
 Labels CSV columns: url, verdict (scam | not_scam; any other value is skipped), scam_type,
 expected_addresses ("|"-separated, exactly as shown on the site), label_basis, notes, labeled_by
@@ -69,10 +70,26 @@ class AddressMetrics:
         return self.correct / self.expected if self.expected else None
 
 
-def load_labels(path: Path, labeled_by: str | None = None) -> list[dict]:
+def load_labels(
+    path: Path,
+    labeled_by: str | None = None,
+    split: str | None = None,
+    reviewed_only: bool = False,
+) -> list[dict]:
+    """Rows with a scam / not_scam verdict. The dataset filters (DESIGN §8.4): `split` keeps one
+    side of the dev/test split; `reviewed_only` drops rows nobody reviewed (`reviewed_by` empty
+    or `none`), which is required for any reported number. Both need the dataset's columns."""
     with path.open(newline="") as f:
         rows = [r for r in csv.DictReader(f) if r.get("verdict") in ("scam", "not_scam")]
-    return [r for r in rows if labeled_by is None or r.get("labeled_by") == labeled_by]
+    if (split or reviewed_only) and rows and "split" not in rows[0]:
+        raise SystemExit(f"{path} has no split/reviewed_by columns (not a dataset labels file)")
+    return [
+        r
+        for r in rows
+        if (labeled_by is None or r.get("labeled_by") == labeled_by)
+        and (split is None or r.get("split") == split)
+        and (not reviewed_only or r.get("reviewed_by", "none") not in ("", "none"))
+    ]
 
 
 def load_results(path: Path) -> dict[str, dict]:
@@ -193,9 +210,13 @@ def main() -> None:
     parser.add_argument("--labels", type=Path, default=LABELS)
     parser.add_argument("--thresholds", type=float, nargs="+", default=list(DEFAULT_THRESHOLDS))
     parser.add_argument("--labeled-by", help="only this author's labels (alex | assistant)")
+    parser.add_argument("--split", choices=["dev", "test"], help="dataset labels: one split only")
+    parser.add_argument(
+        "--reviewed-only", action="store_true", help="dataset labels: human-reviewed rows only"
+    )
     parser.add_argument("--json", type=Path, help="also write the report here")
     args = parser.parse_args()
-    labels = load_labels(args.labels, args.labeled_by)
+    labels = load_labels(args.labels, args.labeled_by, args.split, args.reviewed_only)
     out = report(labels, load_results(args.results), tuple(args.thresholds))
     print_report(out)
     if args.json:

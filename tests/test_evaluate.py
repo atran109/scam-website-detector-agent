@@ -73,3 +73,35 @@ def test_labels_can_be_filtered_by_author(tmp_path: Path) -> None:
     assert [r["url"] for r in ev.load_labels(csv_path, "alex")] == ["a", "c"]
     assert [r["url"] for r in ev.load_labels(csv_path, "assistant")] == ["b"]
     assert len(ev.load_labels(csv_path)) == 3
+
+
+def _dataset_csv(tmp_path: Path) -> Path:
+    path = tmp_path / "labels.csv"
+    path.write_text(
+        "url,verdict,split,reviewed_by\n"
+        "a,scam,test,alex\n"
+        "b,not_scam,test,none\n"
+        "c,scam,dev,alex\n"
+        "d,excluded,test,alex\n"
+        "e,scam,dev,\n"
+    )
+    return path
+
+
+def test_dataset_labels_can_be_filtered_by_split(tmp_path: Path) -> None:
+    path = _dataset_csv(tmp_path)
+    assert [r["url"] for r in ev.load_labels(path, split="test")] == ["a", "b"]
+    assert [r["url"] for r in ev.load_labels(path, split="dev")] == ["c", "e"]
+
+
+def test_reviewed_only_drops_unreviewed_rows(tmp_path: Path) -> None:
+    path = _dataset_csv(tmp_path)
+    assert [r["url"] for r in ev.load_labels(path, reviewed_only=True)] == ["a", "c"]
+    assert [r["url"] for r in ev.load_labels(path, split="test", reviewed_only=True)] == ["a"]
+
+
+def test_dataset_filters_refuse_a_file_without_the_columns(tmp_path: Path) -> None:
+    path = tmp_path / "labels.csv"
+    path.write_text("url,verdict\na,scam\n")
+    with pytest.raises(SystemExit, match="split"):
+        ev.load_labels(path, split="test")

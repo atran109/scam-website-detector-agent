@@ -1328,6 +1328,12 @@ reached a deposit page, extracted an address, plus the stop reason. Where DFPI p
 deposit address for the site, extraction is also checked against it (a different address is
 reported, not counted as an error: operators rotate addresses).
 
+Picked by `python -m eval.dataset_v1.funnel --pick`, using the agent's own account trigger
+(`agent.site_run.account_trigger`: account, deposit or wallet words on the landing page, or an
+address already shown). Tallied by `--tally`. "Reached registration" counts a site where the
+agent registered, typed into at least one form field, or stopped at a sign-up gate (invite
+code, SMS, email check, CAPTCHA, KYC).
+
 ### 8.4 Labels
 
 Stored in `eval/dataset_v1/labels.csv` with the columns `eval/labels.csv` already has, plus
@@ -1353,6 +1359,13 @@ Stored in `eval/dataset_v1/labels.csv` with the columns `eval/labels.csv` alread
   test split and on the dev sample.
 - Dev sites that nobody reviewed keep the labeller's verdict and are marked `reviewed_by=none`;
   they may be used for tuning but never for a reported number.
+- **Tools:** `python -m eval.dataset_v1.labels --build` writes `labels.csv` from the manifest,
+  the labeller file and `split.jsonl`; rerunning it refreshes unreviewed rows and never touches
+  a reviewed one. `--queue` lists the sites to review (an `excluded` or `error` draft always
+  counts as a disagreement, so those dev sites are queued too). `--agreement` reports the
+  change rate separately for the test split, the dev disagreements and the random dev sample;
+  only the first and last are unbiased. `eval/evaluate.py --split test --reviewed-only` gives
+  the reported numbers.
 
 ### 8.5 Clusters and the split
 
