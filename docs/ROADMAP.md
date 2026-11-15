@@ -89,7 +89,7 @@ The stage to finish before anything else: it is enough to put on a resume.
 **A0. Public-ready (≈4 h)**
 - [x] Name fixed to Ferret; MIT LICENSE added (2026-11-14, LOG).
 - [x] GitHub Actions: `make check` on every push to main and every PR, with the browser suite
-  as a second job. First run on GitHub still to be confirmed.
+  as a second job. Both jobs passed on GitHub (2026-11-14, reported by the user).
 - [x] Tracked files scanned for personal data, the home IP and secrets: nothing found. Commit
   author emails are part of the history and become visible when the repo is public.
 - [x] Scam URLs stay as they are in the data files; defanged only where people read them
@@ -98,11 +98,18 @@ The stage to finish before anything else: it is enough to put on a resume.
 - Work on branches with PRs from here on.
 
 **A1. Labeled dataset (≈12 h)**
-- Positives from public crypto-scam feeds (candidates: CryptoScamDB, PhishTank, Chainabuse,
-  ScamSniffer lists; check each one's terms before use). Most feed URLs are dead on arrival, so
-  expect to capture well over 1,000 to keep about 300 live positives.
-- Negatives: legitimate crypto sites (exchanges from CoinGecko's list, wallets, merchants, news)
-  plus non-crypto sites from the Tranco top list. At least 30% negatives.
+- Positives (sources chosen 2026-11-14, LOG): the California DFPI Crypto Scam Tracker (fake
+  trading platforms and pig butchering, the type the agent targets; some entries list deposit
+  addresses to check extraction against), ScamSniffer's `scam-database` (GPL-3.0; daily archive
+  files give listing dates for the time split) and MetaMask's `eth-phishing-detect` blocklist.
+  The two blocklists are mostly wallet-drainer phishing, so they test the classifier more than
+  the agent. Most feed URLs are dead on arrival, so expect to capture well over 1,000 to keep
+  about 300 live positives.
+- Negatives: non-crypto sites from the Tranco top list, exchanges from CoinGecko's API, and
+  MetaMask's allowlist plus the legitimate look-alikes DFPI names (hard negatives). At least
+  30% negatives.
+- The feeds are inputs only: the repository publishes our own verdicts and evidence, with the
+  source of each URL recorded, not copies of the lists.
 - Capture once through the existing sandbox, store the evidence, never revisit for evaluation.
 - **AI-assisted labels, kept honest:**
   - The labeller is a separate pass with the strongest model and the full evidence (agent
@@ -248,6 +255,5 @@ Independent items; do the ones that fit the roles being interviewed for.
 
 ## 9. Still open
 
-1. **Dataset sources** for positives and negatives, pending each one's terms (Stage A1).
-2. **Hosting:** a cloud VM or local with published snapshots (decided at Stage B4).
-3. **Which Stage C items**, decided after Stage B by target role.
+1. **Hosting:** a cloud VM or local with published snapshots (decided at Stage B4).
+2. **Which Stage C items**, decided after Stage B by target role.

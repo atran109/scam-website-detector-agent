@@ -1261,3 +1261,41 @@ On the 43 effective live sites of `capture-2` (classified from saved evidence, 1
 - **CI:** `.github/workflows/ci.yml`, on pushes to `main` and on pull requests, read-only token. Two jobs: `make check PYTHON=python` on Python 3.12, and `make test-browser` (the offline container, `network_mode: none`). Neither contacts a real site, so the selftest rule does not apply. [limit] Not yet run on GitHub: whether the seccomp profile and the 2 GB limit behave on a hosted runner is unknown until the first run. The README has the status badge.
 - **Scan of tracked files (FINDING):** no API keys or private keys, no user paths or email addresses, no private-range IPs outside tests. The one public IPv4 in `output/results.json` (site 084's `recaptcha.cloud` links) is the operator's `server=` value; the visitor `ip=` is `<redacted>` (LOG 2026-10-08 00:13). [limit] The scan covers the working tree, not history (history was searched for the home IP on 2026-10-08). Commit author emails are in the history and become visible when the repository is public.
 - Not done: flipping the repository to public (the user's step on GitHub).
+
+## 2026-11-14 23:37 · H+? · RESULT: CI green on GitHub
+- Pull request #1 (`stage-a0-public-ready`) was merged by the user; `main` is at `c604343`. The user reports both CI jobs green (lint and unit tests; the offline browser suite). Not seen directly: the repository is private and the GitHub CLI is not signed in on this machine. This answers the open question in the 23:20 entry about the seccomp profile and the 2 GB limit on a hosted runner.
+- Stage A0 is done except for flipping the repository to public (the user's step).
+
+## 2026-11-14 23:40 · H+? · FINDING: dataset source research for Stage A1 (no decision yet)
+Read from each source's own pages (GitHub READMEs, terms pages, docs); no lists downloaded, no target sites visited.
+- **ScamSniffer `scam-database`:** GPL-3.0, 358k+ domains (their figure, Oct 2026), updated daily with a 7-day delay, one archive file per day since 2022-05-31 (gives listing dates for a time split). Mostly wallet-drainer and fake-airdrop phishing.
+- **MetaMask `eth-phishing-detect`:** DBAD licence, committed to daily, blocklist in `src/config.json` (MetaMask's own figure: over 205,000 domains). Also has an allowlist of legitimate crypto sites. Mostly phishing.
+- **California DFPI Crypto Scam Tracker:** public government page; each entry has a complaint narrative, scam type and website(s), some with deposit addresses and "not to be confused with" legitimate look-alikes. Mostly fraudulent trading platforms and pig butchering, the type this agent targets. Entry count not checked; several entries say the site is already offline.
+- **CryptoScamDB:** last commit to its blacklist repository was 2022-06-28. Too stale for live captures.
+- **PhishTank:** data is CC BY-SA 2.5 and free, but the bulk download needs an application key, automated access needs written permission, and forum posts from 2022 and 2024 report new registrations closed (not re-checked). General phishing, small crypto share.
+- **Chainabuse:** the API screens a known address or URL (optional category filter); free-tier limits and reuse terms were not found on the page read. Not usable as a bulk source without more checking.
+- **Negatives:** Tranco (free, permanent download URL, research-oriented); CoinGecko API (free Demo plan, 10,000 calls a month; 1,500+ exchanges); DefiLlama (open protocols API; whether each record carries a site URL was not confirmed); MetaMask's allowlist.
+- **Prior art:** the paper "The Poorest Man in Babylon: A Longitudinal Study of Cryptocurrency Investment Scams" (WWW 2025) describes Crimson: certificate-transparency discovery of investment scam sites, automated registration, wallet extraction, clustering, and a two-registration check that found the same deposit address on 15 of 15 sites. 43,572 scam sites in eight months; they report that popular blocklists cover these sites poorly; source code is public. Relevant to ROADMAP Stage B3 and C, and to how the project is described.
+
+## 2026-11-14 23:43 · H+? · DECISION [arch] (user): Stage A1 dataset sources
+- **Positives:** California DFPI Crypto Scam Tracker (core; matches the agent's target type), ScamSniffer `scam-database` and MetaMask `eth-phishing-detect` (volume, freshness, listing dates).
+- **Negatives:** Tranco top sites, CoinGecko's exchange list, MetaMask's allowlist and the legitimate look-alikes DFPI names.
+- **Rejected [alt]:** CryptoScamDB (stale since 2022-06), PhishTank (key and permission needed, little crypto), Chainabuse (lookup API, terms not confirmed), DefiLlama (URL field not confirmed). Basis: the research entry above.
+- [limit] The two blocklists are mostly wallet-drainer phishing, so the dataset's scam mix will differ from the original 160 URLs; results will be reported per source. The feeds are inputs only; lists are not republished (ScamSniffer's is GPL-3.0).
+- The WWW 2025 Crimson paper will be cited in the README as prior art.
+
+## 2026-11-14 23:47 · H+? · DECISION [arch] (user): Stage A1 dataset size, agent scope, visit origin; design proposed in DESIGN §8
+- **Size (user):** about 450 captured sites (roughly 300 scam, 150 legitimate, about 150 held out). Rejected: about 200 (test set too small) and about 900 (doubles review time).
+- **Agent on real sites (user):** only human-labelled scam sites with a sign-up flow, at most 40, DFPI platforms first. The dataset capture itself is landing page only, so no account is ever created on a legitimate site. Rejected: every labelled scam site; none.
+- **Visit origin (user):** the home Mac, as before. Rejected: a cloud VM first (pulls Stage B hosting forward). [limit] Up to 4,000 listed scam domains see the home IP once.
+- **Proposed in DESIGN §8, not yet approved or built** (my calls, open to change): lists fetched on the host from the providers' own sites and kept out of git; ScamSniffer sampled from the latest 60 daily files; labels `scam` / `not_scam` / `excluded`; one split serving both purposes (clusters sorted by listing date, newest third to test); clusters from registrable domain, shared address and a DOM-skeleton hash; MetaMask-only scam clusters go to dev; a hard 0 spend cap; a new `--urls` CLI option as the only pipeline change.
+- [limit] Cost, hour and yield figures are estimates. The DFPI live count is unknown until the liveness check.
+
+## 2026-11-14 23:48 · H+? · DECISION [arch] (user): DESIGN §8 (evaluation dataset) approved
+- The user approved §8 as written, including the calls listed in the previous entry. Next: an implementation plan; no code, downloads or visits yet.
+
+## 2026-11-14 23:51 · H+? · FINDING + DECISION [arch]: Stage A1 plan written; three additions to DESIGN §8 proposed
+- Plan: `docs/plans/2026-11-14-stage-a1-dataset.md` (ten tasks; 1 to 9 are code with unit tests and no network, 10 is the operator runbook). Awaiting the user's approval; no code written.
+- **Finding (reading the code):** §8.2's claim that `--urls` is the only pipeline change is wrong. (1) The LLM gateway picks the model by role and accepts only `judge`, `helper`, `navigator` (`llm/gateway.py`), so a stronger labeller model needs a new `labeller` role. (2) Site ids are three digits (`pipeline.load_sites`), too few for a 4,000-line file. (3) `classify` has no spend cap. The plan's Task 1 writes these into DESIGN before any code; they are approved or rejected with the plan.
+- **My calls in the plan:** the $80 cap is split classify $25, labeller $40, agent $15; quotas per source (ScamSniffer 200, MetaMask blocklist 50, Tranco 50, CoinGecko 60, MetaMask allowlist 30, DFPI look-alikes 10, DFPI all); a domain on both a scam list and a legitimate list is dropped from both; fixtures use only `.example` / `.test` names; the fetcher is restricted to four provider hosts; plans live in `docs/plans/`.
+- [limit] The providers' exact file formats and the labeller model's id and price are unconfirmed; the plan checks each before code depends on it.

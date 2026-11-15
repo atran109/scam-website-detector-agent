@@ -9,6 +9,7 @@ Five stages, each building on the last, plus alternatives and policies:
 5. [Architecture](#5-architecture): how the system and the agent actually run
 6. [Alternatives Considered](#6-alternatives-considered): what else was evaluated and why it wasn't chosen
 7. [Policies and Decision Defaults](#7-policies-and-decision-defaults): output contract, verdict bias, models, budgets, and other operating rules
+8. [Evaluation Dataset](#8-evaluation-dataset): how the labelled benchmark set is built (roadmap Stage A1)
 
 Package name `scamhunter` is a placeholder. Rename freely.
 
@@ -1250,3 +1251,134 @@ Defaults chosen on 2026-10-04. Items marked "revisit" depend on triage or pilot 
 | CAPTCHA (2026-10-06) | At most one click on a checkbox-style widget (reCAPTCHA checkbox, Cloudflare Turnstile). If a challenge appears (image, audio, slider) or the gate is still present, end with `blocked_at: captcha`. Never interact with challenges; never use solving services. Enforced in code (widget/challenge detection from known iframes and selectors, §5.5) and stated in the prompt | Pilot shows a checkbox click passes often enough to matter, or real kits use widgets the detector misses |
 | Agent wall clock (2026-10-06) | `max_seconds` per site is wall-clock time and cancels in-flight calls; navigator API requests time out after 60 s | — |
 | Reviewing generated code | Read every diff for the agent loop, validators and policy checks; be able to explain every module | — |
+
+---
+
+## 8. Evaluation Dataset
+
+Added 2026-11-14 for roadmap Stage A1 (LOG). **Status: approved 2026-11-14; nothing in
+this section is built yet.** Sections 1 to 7 describe the pipeline as it runs today and are
+unchanged.
+
+### 8.1 Purpose and size
+
+A fixed, labelled set of sites for measuring the classifier on data it was not tuned on, and a
+small set of real scam platforms for measuring the agent. The original 160 URLs stay as a
+separate baseline; they were used for tuning, so they are never part of the held-out test set.
+
+Target: about **450 captured sites**, roughly 300 scam and 150 legitimate, with about 150 held
+out as the test set.
+
+| Source | Role | Target after capture | Listing date? |
+|---|---|---:|---|
+| California DFPI Crypto Scam Tracker | Scam: fake trading platforms, pig butchering | every live one (expected 40 to 80; unverified) | No |
+| ScamSniffer `scam-database` daily archives | Scam: mostly wallet-drainer phishing | 180 to 220 | Yes, per day |
+| MetaMask `eth-phishing-detect` blocklist | Scam: phishing not already in ScamSniffer | 40 to 60 | No |
+| Tranco top list | Legitimate, non-crypto (half from the top 1,000, half from ranks 1,000 to 100,000) | 50 | No |
+| CoinGecko exchange list | Legitimate crypto exchanges | 60 | No |
+| MetaMask allowlist, DFPI "not to be confused with" names | Legitimate crypto sites that scammers imitate | 40 | No |
+
+A source's listing is a *lead*, not a label. Labels come from the captured evidence (§8.4).
+
+### 8.2 Building it: four steps
+
+```text
+ 1. fetch lists        2. liveness check       3. capture + classify      4. label + split
+ (host, plain HTTP  ->  (container, proxy,  ->  (container, landing    ->  (labeller pass, then
+  to the providers)      one GET per URL)        page only, no agent)       human review)
+```
+
+1. **Fetch lists** (`scripts/fetch_sources.py`, on the host). Downloads each provider's list
+   from the provider's own site (GitHub, dfpi.ca.gov, tranco-list.eu, CoinGecko's API). These are
+   the list publishers, not target sites, so the container rule does not apply. Raw lists go to
+   `data/dataset/sources/` (gitignored: they are inputs, and are not republished). Output:
+   `data/dataset/candidates.jsonl`, one line per URL with `source`, `listed_on` (when known),
+   and `source_note` (for DFPI: scam type, and any deposit address in the narrative).
+2. **Sample and check liveness.** A seeded sampler picks candidates per source (ScamSniffer:
+   the most recent 60 daily files, an equal number per day, because older listings are almost
+   all dead). The existing triage stage (§5.1a) checks them through the egress proxy, after
+   `make selftest`, in batches until each source's quota of `live` sites is met or a cap of
+   **4,000 checks** is reached.
+3. **Capture and classify.** The existing `capture` and `classify` commands run on the live
+   candidates: landing page only, **no agent, no form submissions**. This is what the
+   classifier benchmark needs, and it guarantees no account is ever created on a legitimate
+   site. Evidence is saved once under `runs/dataset-v1/` and never refreshed for evaluation.
+4. **Label and split** (§8.4, §8.5).
+
+The CLI gains one option, `--urls <file>`, so `triage`, `capture` and `classify` can read the
+dataset's URL file instead of the fixed `data/urls.txt`. No other pipeline code changes.
+
+### 8.3 Agent funnel subset
+
+After labelling, the full pipeline with the agent runs on **at most 40** sites that are (a)
+labelled scam by a human-reviewed label and (b) show a sign-up or login flow, DFPI platforms
+first. All existing agent limits apply (action whitelist, step and time caps, no payments,
+no CAPTCHA services). Reported as a funnel: reached registration, registered, logged in,
+reached a deposit page, extracted an address, plus the stop reason. Where DFPI published a
+deposit address for the site, extraction is also checked against it (a different address is
+reported, not counted as an error: operators rotate addresses).
+
+### 8.4 Labels
+
+Stored in `eval/dataset_v1/labels.csv` with the columns `eval/labels.csv` already has, plus
+`source`, `listed_on`, `cluster_id`, `split`, `labeller_verdict` and `reviewed_by`.
+
+- **Values:** `scam`, `not_scam`, or `excluded` (the capture shows no judgeable content: parked,
+  blank, blocked, taken down). Excluded sites are counted and reported but not scored.
+- **Labeller pass:** a separate script calls the strongest available model once per site with
+  the screenshot, page text, extracted signals and the source's note. It sees more than the
+  classifier does (the classifier never sees the source). It writes `labeller_verdict` and a
+  one-paragraph reason.
+- **Human review** (through the existing `make review` page):
+  - every site in the test split;
+  - in the dev split, every site where the labeller and the pipeline disagree, plus a seeded
+    random 20% of the rest.
+- **Reported alongside the results:** how often the human changed the labeller's verdict, on the
+  test split and on the dev sample.
+- Dev sites that nobody reviewed keep the labeller's verdict and are marked `reviewed_by=none`;
+  they may be used for tuning but never for a reported number.
+
+### 8.5 Clusters and the split
+
+Sibling sites must not sit on both sides of the split. Sites are grouped into clusters by
+connected components over three strong links: same registrable domain, same extracted crypto
+address, or the same page-structure hash (a hash of the DOM tag skeleton of the landing page).
+This is a small first version of the Stage B operator clustering and lives in
+`eval/dataset_v1/cluster.py`, outside the pipeline.
+
+- **Scam clusters with a listing date** (ScamSniffer): sorted by earliest listing date; the
+  newest go to test until test holds about a third of them. This gives the time split.
+- **Scam clusters without a date:** DFPI clusters are split by a seeded random draw, one third
+  to test. MetaMask-only clusters go to dev (no date, and they overlap ScamSniffer in kind).
+- **Legitimate sites:** seeded random draw per source, one third to test.
+- A cluster that mixes dated and undated sites follows its dated members.
+
+The split is made once, written to the labels file and committed. Thresholds, prompts and
+weights are tuned on dev only.
+
+### 8.6 Limits and budget
+
+| Limit | Value |
+|---|---|
+| Liveness checks | 4,000 at most, home connection, one GET each |
+| Captured sites | 500 at most |
+| Agent runs on real sites | 40 at most |
+| LLM spend for this stage | hard cap $80 (classify, labeller and agent combined), enforced by the existing spend cap per command |
+
+### 8.7 What is published
+
+Committed: the labels file (URL, label, source name, split, cluster), the benchmark reports, and
+this section. Not committed: the providers' raw lists, and `runs/` (as today). The README names
+each source and its licence.
+
+### 8.8 Known weaknesses
+
+- The scam mix is set by the sources: mostly drainer phishing, unlike the original 160 URLs.
+  Results are reported per source as well as overall.
+- Only live sites are captured, so the set says nothing new about dead-site handling (§5.2a).
+- Legitimate sites are well-known ones; small, obscure legitimate crypto businesses, the likeliest
+  false positives, are under-represented.
+- The labeller and the classifier are models from the same family. Human review of the whole
+  test split is what the reported numbers rest on.
+- One reviewer, no second opinion.
+- Each scam site contacted sees the home IP once (§5.6).
