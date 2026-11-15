@@ -1,8 +1,10 @@
 # Ferret - Crypto Scam Detection Agent
 
+[![CI](https://github.com/atran109/scam-website-detector-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/atran109/scam-website-detector-agent/actions/workflows/ci.yml)
+
 ## Summary
 
-Furret is a sandboxed browser agent that takes 160 suspected scam URLs, decides for each one
+Ferret is a sandboxed browser agent that takes 160 suspected scam URLs, decides for each one
 whether it is a scam, and pulls out the crypto deposit addresses it shows, including addresses
 that appear only after registering, logging in, verifying an email and opening a deposit page.
 Plain, tested code does the checking, saving, address extraction and output; a Claude model does
@@ -378,3 +380,7 @@ Every input URL appears once and in input order. Fields omitted here are present
 - **A scorer change seems to have no effect:** use `make rescore`, which rebuilds the image first.
 - **Inspect a judgment:** `make review RUN=<id>` builds a local, script-free review page from
   saved evidence. Do not open saved scam HTML in a normal browser.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
