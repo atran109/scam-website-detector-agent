@@ -7,7 +7,6 @@ import json
 from datetime import date
 
 import pytest
-
 from eval.dataset_v1.sources import (
     normalise_host,
     parse_coingecko_exchanges,

@@ -15,7 +15,6 @@ from io import StringIO
 from urllib.parse import urlsplit
 
 import tldextract
-
 from eval.dataset_v1.models import Candidate, Expected, ParseResult, Source
 
 # Bundled suffix list only (no network). Private suffixes are on, so two sites on a shared
