@@ -37,6 +37,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # tests import the dataset tooling as eval.dataset_v1
 markers = ["browser: needs Chromium; runs only in the browser-tests container (make test-browser)"]
 addopts = "-m 'not browser'"
 

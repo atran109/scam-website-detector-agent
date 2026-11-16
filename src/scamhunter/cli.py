@@ -1,13 +1,19 @@
-"""Entrypoints: triage, run, capture, classify, rescore, report, review and the mock runners."""
+"""Entrypoints: triage, run, capture, classify, label, rescore, report, review and the mock
+runners."""
 
 import argparse
 import asyncio
+import json
 import shutil
 import sys
+from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
 
 from scamhunter.config import REPO_ROOT, Settings, load_settings
-from scamhunter.llm.usage_log import count_lines, read_usage
+from scamhunter.labeller import label_run, latest_verdicts
+from scamhunter.llm.client import LLMClient
+from scamhunter.llm.usage_log import GatewayUsage, count_lines, read_usage
 from scamhunter.models import Site, SiteResult
 from scamhunter.pipeline import (
     PIPELINE_VERSION,
@@ -28,6 +34,8 @@ from scamhunter.report.writer import supplement_address_evidence, write_results
 from scamhunter.store import RUNS_DIR, new_run_id, run_dir
 
 URLS_PATH = REPO_ROOT / "data" / "urls.txt"
+MANIFEST_PATH = REPO_ROOT / "data" / "dataset" / "v1" / "manifest.jsonl"
+URLS_FILE_ID_WIDTH = 4  # site ids of a --urls file (DESIGN §8.2)
 OUTPUT_DIR = REPO_ROOT / "output"
 
 
@@ -35,7 +43,8 @@ def _select(sites: list[Site], only: str | None) -> list[Site]:
     if not only:
         return sites
     by_id = {s.site_id: s for s in sites}
-    wanted = [f"{int(i):03d}" for i in only.split(",")]
+    width = len(sites[0].site_id) if sites else 3
+    wanted = [f"{int(i):0{width}d}" for i in only.split(",")]
     return [by_id[i] for i in wanted if i in by_id]  # the order given (the pilot's order)
 
 
@@ -60,10 +69,23 @@ def _finalize(
 
 def _selected(args: argparse.Namespace) -> list[Site]:
     """The sites a command works on; an empty selection is an error, not a clean no-op."""
-    sites = _select(load_sites(URLS_PATH), args.only)
+    sites = _select(_all_sites(args), args.only)
     if not sites:
-        raise SystemExit(f"error: --only {args.only!r} matches no site in data/urls.txt")
+        raise SystemExit(f"error: --only {args.only!r} matches no site in {_urls_path(args)}")
     return sites
+
+
+def _urls_path(args: argparse.Namespace) -> Path:
+    urls = getattr(args, "urls", None)
+    return Path(urls) if urls else URLS_PATH
+
+
+def _all_sites(args: argparse.Namespace) -> list[Site]:
+    """Every site of the input file: data/urls.txt, or the file given with --urls."""
+    path = _urls_path(args)
+    if not path.is_file():
+        raise SystemExit(f"error: URL file not found: {path}")
+    return load_sites(path, URLS_FILE_ID_WIDTH if getattr(args, "urls", None) else 3)
 
 
 async def ask_operator(question: str) -> bool:
@@ -86,7 +108,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
     sites = _selected(args)
     out = run_dir(args.run_id or new_run_id())
     print(f"Triage of {len(sites)} URLs → {out}/triage.jsonl")
-    records = asyncio.run(run_triage(settings, sites, out))
+    records = asyncio.run(run_triage(settings, sites, out, new_only=args.new_only))
     print("\nStatus counts:")
     for status, count in status_counts(records).most_common():
         print(f"  {status:<17} {count}")
@@ -157,11 +179,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _report_gateway_usage(out, start_line: int, site_ids: set[str]):
+def _report_gateway_usage(
+    out: Path, start_line: int, site_ids: set[str], name: str = "usage.json"
+) -> GatewayUsage:
     """What this invocation cost, from the gateway usage log (the figure to use for estimates;
-    `runs/<id>/usage.json`). Counts the log's new lines for this run's sites only."""
+    `runs/<id>/usage.json`). Counts the log's new lines for this run's sites only. `name`: the
+    labeller writes its own file, so it does not replace the classify figure of the same run."""
     usage = read_usage(start_line=start_line, site_ids=site_ids)
-    (out / "usage.json").write_text(usage.model_dump_json(indent=2))
+    (out / name).write_text(usage.model_dump_json(indent=2))
     print(f"LLM cost this invocation (gateway usage log): {usage.line()}", flush=True)
     return usage
 
@@ -194,15 +219,52 @@ def cmd_classify(args: argparse.Namespace) -> int:
         print(f"error: runs/{args.run_id} has no triage.jsonl", file=sys.stderr)
         return 1
     usage_from = count_lines()
-    results = asyncio.run(classify_from_evidence(settings, sites, out))
+    results = asyncio.run(classify_from_evidence(settings, sites, out, args.spend_cap))
     usage = _report_gateway_usage(out, usage_from, {s.site_id for s in sites})
     _finalize(results, settings, args.run_id, usage.model_dump())
     return 0
 
 
+def cmd_label(args: argparse.Namespace) -> int:
+    """Dataset labeller (DESIGN §8.4): a first-draft label per captured site, for human review."""
+    settings = load_settings()
+    manifest_path = Path(args.manifest)
+    if not manifest_path.exists():
+        print(f"error: no manifest at {manifest_path}", file=sys.stderr)
+        return 1
+    manifest = [json.loads(line) for line in manifest_path.read_text().splitlines() if line]
+    out = run_dir(args.run_id)
+    labels = out / "labeller.jsonl"
+    usage_from = count_lines()
+
+    async def go() -> None:
+        client = LLMClient(settings.llm.gateway_url)
+        try:
+            await label_run(
+                client,
+                out,
+                manifest,
+                labels,
+                args.spend_cap,
+                model=settings.llm.labeller_model,
+                concurrency=settings.run.concurrency,
+            )
+        finally:
+            await client.aclose()
+
+    asyncio.run(go())
+    _report_gateway_usage(
+        out, usage_from, {row["site_id"] for row in manifest}, name="labeller_usage.json"
+    )
+    latest = latest_verdicts(labels).values()
+    counts = Counter(v.verdict for v in latest)
+    print(f"labels so far: {dict(sorted(counts.items()))} → {labels}")
+    return 0
+
+
 def cmd_rescore(args: argparse.Namespace) -> int:
     settings = load_settings()
-    sites = load_sites(URLS_PATH)
+    sites = _all_sites(args)
     usage_from = count_lines()
     results = asyncio.run(rescore(settings, sites, run_dir(args.run_id)))
     usage = _report_gateway_usage(run_dir(args.run_id), usage_from, {s.site_id for s in sites})
@@ -360,6 +422,11 @@ def main(argv: list[str] | None = None) -> int:
     triage = sub.add_parser("triage", help="stage 0 only → runs/<id>/triage.jsonl")
     triage.add_argument("--run-id", help="run directory name (default: timestamp)")
     triage.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
+    triage.add_argument(
+        "--new-only",
+        action="store_true",
+        help="keep the run's existing results and check only sites that have none (batches)",
+    )
 
     run = sub.add_parser("run", help="full pipeline → runs/<id>/output/results.json")
     run.add_argument("--run-id", help="run directory name (default: timestamp)")
@@ -401,10 +468,29 @@ def main(argv: list[str] | None = None) -> int:
     classify.add_argument("--run-id", required=True)
     classify.add_argument("--only", help="comma-separated site numbers, e.g. 17,42")
 
+    label = sub.add_parser(
+        "label", help="dataset labeller: first-draft labels from a run's saved evidence"
+    )
+    label.add_argument("--run-id", required=True)
+    label.add_argument("--manifest", default=str(MANIFEST_PATH), help="dataset manifest.jsonl")
+    label.add_argument(
+        "--spend-cap",
+        type=float,
+        required=True,
+        help="total estimated USD for this run's labels, counting earlier invocations",
+    )
+
     rescore_parser = sub.add_parser(
         "rescore", help="re-classify a run from saved evidence (no visits)"
     )
     rescore_parser.add_argument("--run-id", required=True)
+    classify.add_argument(
+        "--spend-cap", type=float, help="stop judging at this estimated spend in USD"
+    )
+    for command in (triage, run, capture, classify, rescore_parser):
+        command.add_argument(
+            "--urls", help="URL file to use instead of data/urls.txt (four-digit site ids)"
+        )
     report = sub.add_parser("report", help="publish a run's results into output/")
     report.add_argument("--run-id", required=True)
     report.add_argument(
@@ -441,6 +527,7 @@ def main(argv: list[str] | None = None) -> int:
         "run": cmd_run,
         "capture": cmd_capture,
         "classify": cmd_classify,
+        "label": cmd_label,
         "rescore": cmd_rescore,
         "report": cmd_report,
         "review": cmd_review,

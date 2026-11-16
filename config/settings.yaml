@@ -31,6 +31,7 @@ llm:
   judge_model: "claude-sonnet-5-5"
   navigator_model: "claude-sonnet-5-5"
   helper_model: "claude-haiku-4-5"  # simple yes/no sub-calls; revisit after measuring the first 10 sites
+  labeller_model: "claude-opus-5-5" # dataset labels only (DESIGN §8.4); one tier above the judge
   judge_effort: "medium"            # low | medium | high; tune on hand labels
   gateway_url: "http://llm-gateway:8080"
   cache_responses: true             # reproducibility: current models reject non-default temperature

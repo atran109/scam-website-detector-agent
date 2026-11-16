@@ -86,6 +86,15 @@ def worst_case_usd(limits: AgentLimits, model: str) -> float:
     return (limits.max_tokens_in * price_in + limits.max_tokens_out * price_out) / 1_000_000
 
 
+def account_trigger(landing_text: str, has_address: bool) -> bool:
+    """The landing page shows an account, deposit or wallet flow, or already an address."""
+    return (
+        has_address
+        or bool(ACCOUNT_FLOW.search(landing_text))
+        or bool(WALLET_CONNECT.search(landing_text))
+    )
+
+
 def should_navigate(
     c: Classification,
     uncertain_band: tuple[float, float],
@@ -99,12 +108,7 @@ def should_navigate(
     login flows and pages that already expose an address (LOG 2026-10-07 18:30)."""
     low, high = uncertain_band
     verdict_trigger = c.verdict == Verdict.SCAM or low <= c.scam_probability <= high
-    account_trigger = (
-        has_address
-        or bool(ACCOUNT_FLOW.search(landing_text))
-        or bool(WALLET_CONNECT.search(landing_text))
-    )
-    return verdict_trigger or account_trigger
+    return verdict_trigger or account_trigger(landing_text, has_address)
 
 
 def spend_blocks(opts: NavigationOptions, model: str) -> str | None:

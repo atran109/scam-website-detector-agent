@@ -155,3 +155,31 @@ def test_requests_may_opt_out_of_the_response_cache() -> None:
     }
     assert validate_request(body).cache is True
     assert validate_request(body | {"cache": False}).cache is False
+
+
+# ---------- labeller role (DESIGN §8.2) ----------
+
+
+def test_gateway_accepts_the_labeller_role() -> None:
+    assert validate_request({**body(), "role": "labeller"}).role == "labeller"
+
+
+def test_labeller_role_gets_no_extra_freedom() -> None:
+    server_tool = {"tools": [{"type": "web_fetch_20260209", "name": "web_fetch"}]}
+    with pytest.raises(ValueError, match="server tool"):
+        validate_request({**body(**server_tool), "role": "labeller"})
+    with pytest.raises(ValueError, match="output_config"):
+        validate_request({**body(output_config={"task_budget": {}}), "role": "labeller"})
+
+
+def test_labeller_role_maps_to_its_own_model_with_a_price() -> None:
+    from scamhunter.config import load_settings
+    from scamhunter.llm.client import PRICES_PER_MTOK
+    from scamhunter.llm.gateway import REQUEST_LIMITS, role_models
+
+    settings = load_settings()
+    models = role_models(settings)
+    assert models["labeller"] == settings.llm.labeller_model == "claude-opus-5-5"
+    assert models["judge"] == settings.llm.judge_model
+    assert settings.llm.labeller_model in PRICES_PER_MTOK
+    assert "labeller" in REQUEST_LIMITS

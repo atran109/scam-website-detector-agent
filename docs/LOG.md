@@ -1261,3 +1261,117 @@ On the 43 effective live sites of `capture-2` (classified from saved evidence, 1
 - **CI:** `.github/workflows/ci.yml`, on pushes to `main` and on pull requests, read-only token. Two jobs: `make check PYTHON=python` on Python 3.12, and `make test-browser` (the offline container, `network_mode: none`). Neither contacts a real site, so the selftest rule does not apply. [limit] Not yet run on GitHub: whether the seccomp profile and the 2 GB limit behave on a hosted runner is unknown until the first run. The README has the status badge.
 - **Scan of tracked files (FINDING):** no API keys or private keys, no user paths or email addresses, no private-range IPs outside tests. The one public IPv4 in `output/results.json` (site 084's `recaptcha.cloud` links) is the operator's `server=` value; the visitor `ip=` is `<redacted>` (LOG 2026-10-08 00:13). [limit] The scan covers the working tree, not history (history was searched for the home IP on 2026-10-08). Commit author emails are in the history and become visible when the repository is public.
 - Not done: flipping the repository to public (the user's step on GitHub).
+
+## 2026-11-14 23:37 · H+? · RESULT: CI green on GitHub
+- Pull request #1 (`stage-a0-public-ready`) was merged by the user; `main` is at `c604343`. The user reports both CI jobs green (lint and unit tests; the offline browser suite). Not seen directly: the repository is private and the GitHub CLI is not signed in on this machine. This answers the open question in the 23:20 entry about the seccomp profile and the 2 GB limit on a hosted runner.
+- Stage A0 is done except for flipping the repository to public (the user's step).
+
+## 2026-11-14 23:40 · H+? · FINDING: dataset source research for Stage A1 (no decision yet)
+Read from each source's own pages (GitHub READMEs, terms pages, docs); no lists downloaded, no target sites visited.
+- **ScamSniffer `scam-database`:** GPL-3.0, 358k+ domains (their figure, Oct 2026), updated daily with a 7-day delay, one archive file per day since 2022-05-31 (gives listing dates for a time split). Mostly wallet-drainer and fake-airdrop phishing.
+- **MetaMask `eth-phishing-detect`:** DBAD licence, committed to daily, blocklist in `src/config.json` (MetaMask's own figure: over 205,000 domains). Also has an allowlist of legitimate crypto sites. Mostly phishing.
+- **California DFPI Crypto Scam Tracker:** public government page; each entry has a complaint narrative, scam type and website(s), some with deposit addresses and "not to be confused with" legitimate look-alikes. Mostly fraudulent trading platforms and pig butchering, the type this agent targets. Entry count not checked; several entries say the site is already offline.
+- **CryptoScamDB:** last commit to its blacklist repository was 2022-06-28. Too stale for live captures.
+- **PhishTank:** data is CC BY-SA 2.5 and free, but the bulk download needs an application key, automated access needs written permission, and forum posts from 2022 and 2024 report new registrations closed (not re-checked). General phishing, small crypto share.
+- **Chainabuse:** the API screens a known address or URL (optional category filter); free-tier limits and reuse terms were not found on the page read. Not usable as a bulk source without more checking.
+- **Negatives:** Tranco (free, permanent download URL, research-oriented); CoinGecko API (free Demo plan, 10,000 calls a month; 1,500+ exchanges); DefiLlama (open protocols API; whether each record carries a site URL was not confirmed); MetaMask's allowlist.
+- **Prior art:** the paper "The Poorest Man in Babylon: A Longitudinal Study of Cryptocurrency Investment Scams" (WWW 2025) describes Crimson: certificate-transparency discovery of investment scam sites, automated registration, wallet extraction, clustering, and a two-registration check that found the same deposit address on 15 of 15 sites. 43,572 scam sites in eight months; they report that popular blocklists cover these sites poorly; source code is public. Relevant to ROADMAP Stage B3 and C, and to how the project is described.
+
+## 2026-11-14 23:43 · H+? · DECISION [arch] (user): Stage A1 dataset sources
+- **Positives:** California DFPI Crypto Scam Tracker (core; matches the agent's target type), ScamSniffer `scam-database` and MetaMask `eth-phishing-detect` (volume, freshness, listing dates).
+- **Negatives:** Tranco top sites, CoinGecko's exchange list, MetaMask's allowlist and the legitimate look-alikes DFPI names.
+- **Rejected [alt]:** CryptoScamDB (stale since 2022-06), PhishTank (key and permission needed, little crypto), Chainabuse (lookup API, terms not confirmed), DefiLlama (URL field not confirmed). Basis: the research entry above.
+- [limit] The two blocklists are mostly wallet-drainer phishing, so the dataset's scam mix will differ from the original 160 URLs; results will be reported per source. The feeds are inputs only; lists are not republished (ScamSniffer's is GPL-3.0).
+- The WWW 2025 Crimson paper will be cited in the README as prior art.
+
+## 2026-11-14 23:47 · H+? · DECISION [arch] (user): Stage A1 dataset size, agent scope, visit origin; design proposed in DESIGN §8
+- **Size (user):** about 450 captured sites (roughly 300 scam, 150 legitimate, about 150 held out). Rejected: about 200 (test set too small) and about 900 (doubles review time).
+- **Agent on real sites (user):** only human-labelled scam sites with a sign-up flow, at most 40, DFPI platforms first. The dataset capture itself is landing page only, so no account is ever created on a legitimate site. Rejected: every labelled scam site; none.
+- **Visit origin (user):** the home Mac, as before. Rejected: a cloud VM first (pulls Stage B hosting forward). [limit] Up to 4,000 listed scam domains see the home IP once.
+- **Proposed in DESIGN §8, not yet approved or built** (my calls, open to change): lists fetched on the host from the providers' own sites and kept out of git; ScamSniffer sampled from the latest 60 daily files; labels `scam` / `not_scam` / `excluded`; one split serving both purposes (clusters sorted by listing date, newest third to test); clusters from registrable domain, shared address and a DOM-skeleton hash; MetaMask-only scam clusters go to dev; a hard 0 spend cap; a new `--urls` CLI option as the only pipeline change.
+- [limit] Cost, hour and yield figures are estimates. The DFPI live count is unknown until the liveness check.
+
+## 2026-11-14 23:48 · H+? · DECISION [arch] (user): DESIGN §8 (evaluation dataset) approved
+- The user approved §8 as written, including the calls listed in the previous entry. Next: an implementation plan; no code, downloads or visits yet.
+
+## 2026-11-14 23:51 · H+? · FINDING + DECISION [arch]: Stage A1 plan written; three additions to DESIGN §8 proposed
+- Plan: `docs/plans/2026-11-14-stage-a1-dataset.md` (ten tasks; 1 to 9 are code with unit tests and no network, 10 is the operator runbook). Awaiting the user's approval; no code written.
+- **Finding (reading the code):** §8.2's claim that `--urls` is the only pipeline change is wrong. (1) The LLM gateway picks the model by role and accepts only `judge`, `helper`, `navigator` (`llm/gateway.py`), so a stronger labeller model needs a new `labeller` role. (2) Site ids are three digits (`pipeline.load_sites`), too few for a 4,000-line file. (3) `classify` has no spend cap. The plan's Task 1 writes these into DESIGN before any code; they are approved or rejected with the plan.
+- **My calls in the plan:** the $80 cap is split classify $25, labeller $40, agent $15; quotas per source (ScamSniffer 200, MetaMask blocklist 50, Tranco 50, CoinGecko 60, MetaMask allowlist 30, DFPI look-alikes 10, DFPI all); a domain on both a scam list and a legitimate list is dropped from both; fixtures use only `.example` / `.test` names; the fetcher is restricted to four provider hosts; plans live in `docs/plans/`.
+- [limit] The providers' exact file formats and the labeller model's id and price are unconfirmed; the plan checks each before code depends on it.
+
+## 2026-11-14 23:55 · H+? · DECISION [arch] (user): Stage A1 plan approved, with three additions to DESIGN §8
+- The user approved `docs/plans/2026-11-14-stage-a1-dataset.md` and chose to build it in one session with a single review at the end. This amends the 23:47 entry's "`--urls` as the only pipeline change": DESIGN §8.2 now lists `--urls` with four-digit ids, `classify --spend-cap`, a `labeller` gateway role (§5.6) and a `label` command.
+- `data/dataset/sources/` and `candidates.jsonl` are gitignored; the sources folder is also kept out of the Docker build context.
+
+## 2026-11-15 00:02 · H+? · FINDING: provider list formats confirmed; parsers written (plan Task 3)
+One sample per provider was downloaded on the host from the provider's own site (user approved), into the gitignored `data/dataset/sources/samples/`.
+- **ScamSniffer** daily archive file: `{"domains": [...]}`; the 2026-11-01 file has 81 entries (76 usable), so 60 days is roughly 4,500 candidates. It contains `.invalid` probe entries, which the parser skips.
+- **MetaMask** `src/config.json`: keys are `blacklist` (121,553 entries, 114,844 usable distinct domains) and `whitelist` (59 entries, 53 usable), not "blocklist"/"allowlist". [limit] The whitelist is small, so its quota of 30 is most of it.
+- **DFPI**: one HTML table, 645 rows, 609 with a website; 773 distinct scam domains (95 given with a path, which is kept), 74 with a crypto address in the narrative, and 50 legitimate look-alike domains named after "not to be confused with". [limit] The look-alike extraction is a regex over prose and can pick up a wrong name; labels come from evidence, so a wrong lead costs one capture.
+- **Tranco**: `rank,domain` CSV. [limit] The top ranks include infrastructure domains with no website (`amazonaws.com`, `fbcdn.net`); the liveness check and the `excluded` label absorb them.
+- **CoinGecko** `/api/v3/exchanges`: works without a key and each record has `url`. The stop condition in the plan did not trigger.
+- **Decisions in the parsers:** entries are deduplicated by registrable domain, first one wins; private suffixes count (two sites on `pages.dev` are two domains), which differs from the pipeline's own extractor; IP addresses and non-public names are skipped and counted; a file in an unexpected shape gives an empty result with a reason instead of an error. Test fixtures use invented `.example` names.
+- `pyproject.toml`: pytest `pythonpath = ["."]` so tests can import `eval.dataset_v1`.
+
+## 2026-11-15 00:08 · H+? · DECISION [arch] (user): labeller model is Claude Opus 5.5
+- The dataset labeller (DESIGN §8.4) runs on `claude-opus-5-5` through a new gateway role, `labeller`. Model id and list prices ($4 in / $20 out per million tokens) were read from the current Claude API reference, not from memory; the price entry was already in `llm/client.py`.
+- Rejected [alt]: Claude Fable 5.2 ($8 / $40): about twice the cost, an estimated $45 for 450 sites against the $40 labelling cap, and it would need refusal handling the gateway does not have for that model.
+- [limit] Opus 5.5 and the judge's Sonnet 5.5 are the same model family; DESIGN §8.8 already lists this.
+- The `labeller` role is subject to the same request whitelist as the other roles (tested: server tools and unknown `output_config` keys are still rejected).
+
+## 2026-11-15 · H+? · DECISION [arch] (user): the labeller's inputs and run rules (plan Task 7)
+- `src/scamhunter/labeller.py`, `scamhunter label`, `make label`. Four choices the user made in a dialog:
+  - **No pipeline signals in the labeller prompt.** DESIGN §8.4 listed them; the plan left them out. The labeller's disagreements with the pipeline pick which dev sites get human review, so it should not be shown the pipeline's own clues. Rejected [alt]: following §8.4 as written. §8.4 updated (amends the 2026-11-14 23:48 approval of §8).
+  - **Errors are retried on rerun.** A site whose last line is `error` is tried again; the last line per site wins. A malformed reply comes back from the gateway cache for free and stays `error`; a gateway outage gets a second chance. Rejected [alt]: any line counts as done, which would make a brief outage permanent.
+  - **Parallel, like classify:** `run.concurrency` sites at once; the cap can be overshot by at most `concurrency - 1` sites (under $0.50 at Opus prices). Rejected [alt]: one at a time, about 3 hours for 500 sites.
+  - **Effort `high`** for Opus. Rejected [alt]: `medium`, the judge's setting.
+- My calls, within the plan:
+  - The spend cap counts every line already in `labeller.jsonl`, so `--spend-cap 40` is the labeller's whole budget across reruns, matching the $40 line in §8.6.
+  - "Captured" means `runs/<id>/sites/<site_id>/` exists, which capture creates for every site it attempts. Manifest rows never captured (dead at liveness, or over quota) are skipped, not labelled `excluded`.
+  - The landing page is the last non-agent snapshot, the same one the judge sees.
+  - The prompt also gets the final URL. The plan's list left it out, but phishing cannot be judged without the domain. The source's note (DFPI narrative) is wrapped as untrusted along with the page text and title.
+  - `label_run` has two keyword arguments the plan's signature did not: `model` (for the cost estimate) and `concurrency`.
+- [limit] Costs are estimates at list price, not billing; the gateway usage log figure printed after each run is the one to record.
+
+## 2026-11-15 · H+? · DECISION [arch] (user): clusters and the dev/test split (plan Task 8)
+- `eval/dataset_v1/cluster.py` (union-find over domain, address and page-structure links) and `split.py` (`python -m eval.dataset_v1.split`). Four choices the user made in a dialog:
+  - **Label before split.** Sites the labeller calls `excluded` or `error` take no structure link, so domains parked with the same parking company (identical pages) cannot fuse into one giant cluster. Runbook steps 6 and 7 swapped in the plan. Rejected [alt]: keep the order and judge "judgeable" from the pipeline, which counts a parked page as live content.
+  - **The split is saved to `data/dataset/v1/split.jsonl` and committed**; Task 9 copies it into `labels.csv`. The command refuses to overwrite it without `--force` (§8.5: made once). Rejected [alt]: recompute it inside Task 9.
+  - **"A third" counts sites, not clusters.** Scores are per site. One big cluster can push test a little over a third. Rejected [alt]: counting clusters, as the plan's wording read.
+  - **A cluster with any scam-list member is a scam cluster**, even if it also holds a legitimate-list site (a phishing copy sharing the real site's structure). The command prints these mixed clusters. Rejected [alt]: never let a structure match join scam and legitimate sites, which could put a real site and its clone on opposite sides.
+- My calls, within §8.5:
+  - Addresses for links are the primary-tier ones from the classify checkpoint. Low-confidence ones (seen only in a JS bundle) are left out, as they may be library constants.
+  - The structure hash is sha256 of the opening-tag names in order, ignoring text and attributes, so two copies of one kit with different brand names match. Under 30 tags: no hash.
+  - Undated scam clusters with any DFPI member go to the DFPI random draw; the rest (MetaMask blocklist only) go to dev. A legitimate cluster that holds several sources is drawn with the source that comes first in the sampler's `PRIORITY`.
+  - Random draws use the same sites-based third as the time split, so all groups follow one rule. One `random.Random(20261114)` is used, with groups drawn in a fixed order (DFPI, then legitimate sources in `PRIORITY` order) and cluster ids sorted before shuffling.
+  - Cluster ids (`c0001`…) are numbered by each cluster's smallest site id, so the same input always gives the same ids.
+- [limit] Clustering is only as good as its three links. Sibling sites on different kits with different addresses stay apart, so some leakage between dev and test is possible; added to DESIGN §8.8.
+
+## 2026-11-15 · H+? · DECISION [arch] (user): labels file, review queue, agreement, funnel, evaluate filters (plan Task 9)
+- `eval/dataset_v1/labels.py`, `funnel.py`; `eval/evaluate.py --split --reviewed-only`. Two choices the user made in a dialog:
+  - **"Reached registration"** = registered, typed into at least one form field, or stopped at a sign-up gate (invite code, SMS, email check, CAPTCHA, KYC). The agent records no such field. Rejected [alt]: registered only, which would make two funnel steps the same number.
+  - **`excluded` drafts count as disagreements**, so excluded dev sites go to human review, as the plan says. A wrong `excluded` would silently drop a site from scoring. Rejected [alt]: reach them only through the 20% sample.
+- My calls, within the plan:
+  - **`--build` merges:** a rebuild refreshes unreviewed rows and keeps every reviewed row exactly as it is (including its `labeller_verdict`, so agreement is measured against the draft the reviewer saw). Safe to rerun after the labeller retries errors.
+  - **Agreement is reported in three parts** (test, dev disagreements, random dev sample), not two. The disagreement rows were picked for disagreeing, so mixing them into the dev rate would make the labeller look worse than it is. So `agreement` also takes the pipeline verdicts. That differs from the plan's `agreement(rows)`.
+  - **`build_labels(manifest, labeller, split)`** reads the clusters and split from `split.jsonl` (Task 8) and does not take pipeline results. Pre-filling `expected_addresses` from the pipeline would make the address evaluation circular, so it is left for the reviewer.
+  - A new row has `labeled_by=labeller`. A site in the split with no labeller line gets `error`, so it is queued.
+  - **Funnel:** "reviewed" means `reviewed_by` is not `none`, rather than literally `alex`. The account trigger is the agent's own, moved out of `should_navigate` into `account_trigger` with no behaviour change. It counts addresses of every tier, as the pipeline does. Picks go DFPI first, then the sampler's `PRIORITY` order, then site id.
+  - **`tally`** takes (navigation trace, primary addresses) pairs instead of whole results, which keeps tests small. **`dfpi_address_check`** compares EVM addresses case-insensitively and every other format exactly.
+  - **The review queue** is printed and written to `runs/<id>/review_queue.txt` (not committed; it can be regenerated from the seed).
+
+## 2026-11-15 12:00 · H+? · FINDING + DECISION [arch]: branch review before the PR; ten fixes
+A review of the whole `stage-a1-dataset` branch against `main` (run before opening the PR for plan Tasks 1 to 9) found ten issues. All are fixed, each with a test. No real site had been contacted and no label written, so nothing has to be redone.
+- **Two choices the user made in a dialog:**
+  - **`triage --new-only`.** `run_triage` checked every site it was given and replaced `triage.jsonl`, so a second batch either re-contacted batch 1 (four batches of 500 would be 5,000 requests against the 4,000 cap) or, with `--only`, lost batch 1's results. With the flag, sites that already have a result are kept and not contacted. It refuses to run if a site id now points at a different URL. Rejected [alt]: one big batch with no repeats, which checks far more scam sites than the quotas need.
+  - **Clusters also link on the domain a landing page redirected to** (amends the 2026-11-15 clusters entry and DESIGN §8.5). The sampler takes one site per listed domain, so the "same registrable domain" link could never fire. Judgeable pages only. Rejected [alt]: leave it and document the gap.
+- **Fixed without a design choice:**
+  - Labeller: an exception while reading one site's evidence (a broken screenshot) is recorded as `error` instead of stopping the run. The final URL is now inside an untrusted block; the site chooses it, and the prompt treats everything outside the blocks as instructions. Usage goes to `labeller_usage.json` so it no longer replaces classify's `usage.json`.
+  - `labels.csv` is written to a temporary file and swapped in, and an unknown column stops the build before anything is written. Before, a rejected row left the file emptied.
+  - The review queue is saved to `data/dataset/v1/review_queue.jsonl` (committed) with the reason for each site, and `--agreement` reads it. Before, the 20% sample was redrawn on every call, so one changed label picked a different sample and the reviewed rows dropped out of the figure. This supersedes "the review queue is … not committed" in the 2026-11-15 Task 9 entry; `agreement` now takes the saved queue instead of the pipeline verdicts.
+  - The split refuses to run while a captured site has no labeller verdict, a labeller error or no classify result (`--allow-incomplete` overrides).
+  - A domain ScamSniffer lists on several days keeps its earliest date (it was getting the newest, which could put an old scam in the test split's "newest" group).
+  - "Reached registration" counts a fill only if the policy allowed it and the browser carried it out.
+- [limit] The judge's prompt (`classify/llm_judge.py`) also shows the URL outside an untrusted block. That code predates this branch and changing it would change cached judgments, so it is left for Stage A2. [future]
+- [limit] The three entries above this one dated 2026-11-15 lack the `HH:MM` the format asks for; the times were not recorded. They were written earlier the same day, in the order shown.

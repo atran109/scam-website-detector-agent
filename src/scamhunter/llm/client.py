@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import httpx
 
-Role = Literal["judge", "helper", "navigator"]
+Role = Literal["judge", "helper", "navigator", "labeller"]
 
 # USD per million tokens (input, output), first-party API rates as of 2026-10. Cache reads cost
 # 0.1x input and 5-minute cache writes 1.25x. Used for budgets and reports, not billing.

@@ -9,7 +9,7 @@ RUN_ID ?= $(shell date +%Y-%m-%dT%H-%M-%S)
 ROUTER_IP ?= $(shell route -n get default 2>/dev/null | awk '/gateway:/{print $$2}')
 COMPOSE := RUN_ID=$(RUN_ID) SELFTEST_ROUTER_IP=$(ROUTER_IP) docker compose
 
-.PHONY: agent-mock pipeline-mock pilot review build selftest triage run capture classify rescore eval report test test-browser lint check venv down
+.PHONY: agent-mock pipeline-mock pilot review build selftest triage run capture classify label rescore eval report test test-browser lint check venv down
 
 $(BIN)/python: pyproject.toml
 	$(PYTHON) -m venv $(VENV)
@@ -86,7 +86,15 @@ pilot:
 classify: build
 	@test -n "$(RUN)" || (echo "usage: make classify RUN=<run id>"; exit 1)
 	$(COMPOSE) up -d --wait llm-gateway
-	$(COMPOSE) run --rm --no-deps crawler scamhunter classify --run-id $(notdir $(RUN))
+	$(COMPOSE) run --rm --no-deps crawler scamhunter classify --run-id $(notdir $(RUN)) $(ARGS)
+
+# Dataset labeller (DESIGN §8.4): first-draft labels from a run's saved evidence, for human
+# review. No visits. Needs the gateway (Opus; about $0.05-0.08 a site). ARGS must give
+# --spend-cap; --manifest defaults to data/dataset/v1/manifest.jsonl.
+label: build
+	@test -n "$(RUN)" || (echo "usage: make label RUN=<run id> ARGS=\"--spend-cap 40\""; exit 1)
+	$(COMPOSE) up -d --wait llm-gateway
+	$(COMPOSE) run --rm --no-deps crawler scamhunter label --run-id $(notdir $(RUN)) $(ARGS)
 
 # Re-classify from saved evidence; no site visits, so no selftest gate. Needs the gateway.
 RUN ?=
@@ -95,7 +103,7 @@ RUN ?=
 rescore: build
 	@test -n "$(RUN)" || (echo "usage: make rescore RUN=runs/<id>"; exit 1)
 	$(COMPOSE) up -d --wait llm-gateway
-	$(COMPOSE) run --rm --no-deps crawler scamhunter rescore --run-id $(notdir $(RUN))
+	$(COMPOSE) run --rm --no-deps crawler scamhunter rescore --run-id $(notdir $(RUN)) $(ARGS)
 
 # Precision/recall at 0.45 and 0.5 against eval/labels.csv (no containers, no network).
 eval: venv

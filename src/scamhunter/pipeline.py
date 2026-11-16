@@ -83,8 +83,10 @@ INTERSTITIAL_BUTTON = re.compile(r"ignore\s*&\s*proceed|proceed anyway|continue 
 # ============================================================
 
 
-def load_sites(path: Path) -> list[Site]:
-    """One Site per non-blank line, in file order. No dedupe: paths like /wap are significant."""
+def load_sites(path: Path, id_width: int = 3) -> list[Site]:
+    """One Site per non-blank line, in file order. No dedupe: paths like /wap are significant.
+    `id_width` is the zero-padding of site ids: 3 for data/urls.txt, 4 for a `--urls` file
+    (DESIGN §8.2: a dataset file can hold up to 4,000 lines)."""
     sites: list[Site] = []
     for line_no, line in enumerate(path.read_text().splitlines(), start=1):
         url = line.strip()
@@ -95,7 +97,7 @@ def load_sites(path: Path) -> list[Site]:
             raise ValueError(f"{path}:{line_no}: not an http(s) URL: {url!r}")
         sites.append(
             Site(
-                site_id=f"{len(sites) + 1:03d}",
+                site_id=f"{len(sites) + 1:0{id_width}d}",
                 url=url,
                 host=parts.hostname,
                 registrable_domain=_extract(parts.hostname).top_domain_under_public_suffix,
@@ -109,8 +111,30 @@ def load_sites(path: Path) -> list[Site]:
 # ============================================================
 
 
-async def run_triage(settings: Settings, sites: list[Site], out_dir: Path) -> list[TriageRecord]:
-    """Probe every site through the egress proxy; write triage.jsonl in input order."""
+async def run_triage(
+    settings: Settings, sites: list[Site], out_dir: Path, new_only: bool = False
+) -> list[TriageRecord]:
+    """Probe every site through the egress proxy; write triage.jsonl in input order.
+
+    `new_only` (dataset batches, DESIGN §8.2): sites that already have a line in triage.jsonl
+    are not contacted again and keep their result; only the others are probed, and the file
+    then holds both, in site-id order. Returns the newly probed records."""
+    path = out_dir / "triage.jsonl"
+    earlier: dict[str, TriageRecord] = {}
+    if new_only and path.exists():
+        for line in path.read_text().splitlines():
+            record = TriageRecord.model_validate_json(line)
+            earlier[record.site.site_id] = record
+        for site in sites:
+            known = earlier.get(site.site_id)
+            if known is not None and known.site.url != site.url:
+                raise ValueError(
+                    f"site {site.site_id} is {site.url} but triage.jsonl has {known.site.url}: "
+                    "the URL file's lines moved; ids must stay fixed"
+                )
+        sites = [s for s in sites if s.site_id not in earlier]
+        print(f"{len(earlier)} sites already checked are kept; {len(sites)} new to check")
+
     proxy = require_egress_proxy()
     semaphore = asyncio.Semaphore(settings.triage.concurrency)
     verified = make_client(proxy, settings.http, settings.triage, verify=True)
@@ -126,7 +150,8 @@ async def run_triage(settings: Settings, sites: list[Site], out_dir: Path) -> li
         records = await asyncio.gather(*(one(site) for site in sites))
 
     assert len(records) == len(sites), "triage must produce exactly one record per URL"
-    write_jsonl(out_dir / "triage.jsonl", records)
+    merged = earlier | {r.site.site_id: r for r in records}
+    write_jsonl(path, [merged[k] for k in sorted(merged)] if new_only else records)
     return records
 
 
@@ -1125,23 +1150,33 @@ def original_triage(run_dir: Path) -> dict[str, TriageResult]:
 
 
 async def classify_from_evidence(
-    settings: Settings, sites: list[Site], run_dir: Path
+    settings: Settings, sites: list[Site], run_dir: Path, spend_cap_usd: float | None = None
 ) -> list[SiteResult]:
     """Judge every site from the evidence a run saved, with no checkpoint needed: for a
     capture-only run (`scamhunter capture`), which saved snapshots and no verdicts. Sites with
     no snapshots (dead, or not captured) take the dead-site policy without Wayback. Nothing is
     visited and the navigation agent does not run; the checkpoint written here lets `rescore`,
-    `report` and `review` work on the run afterwards."""
+    `report` and `review` work on the run afterwards.
+
+    `spend_cap_usd` stops new judgments once the estimated spend reaches it (every token priced
+    as the judge model, so the estimate errs high). Sites in flight finish, so the overshoot is
+    at most `concurrency - 1` sites. Running the command again continues: finished sites are
+    answered from the gateway's response cache at no cost."""
     triage = load_triage(run_dir / "triage.jsonl")
     llm = LLMClient(settings.llm.gateway_url)
     ctx = RunContext(settings=settings, run_dir=run_dir, llm=llm)
     semaphore = asyncio.Semaphore(settings.run.concurrency)
+    spent_usd = 0.0
 
-    async def one(site: Site) -> SiteResult:
+    async def one(site: Site) -> SiteResult | None:
+        nonlocal spent_usd
         started = datetime.now(UTC)
         async with semaphore:
+            if spend_cap_usd is not None and spent_usd >= spend_cap_usd:
+                return None
             snapshots = load_snapshots(ctx.site_dir(site))
             analysis = await analyze(ctx, site, triage[site.site_id], snapshots)
+            spent_usd += analysis.usage.cost_usd(settings.llm.judge_model)
         capture_file = ctx.site_dir(site) / "capture.json"
         notes = json.loads(capture_file.read_text())["notes"] if capture_file.exists() else []
         print(
@@ -1160,10 +1195,17 @@ async def classify_from_evidence(
             trace_path=None,
         )
 
-    results = await asyncio.gather(*(one(s) for s in sites if s.site_id in triage))
+    outcomes = await asyncio.gather(*(one(s) for s in sites if s.site_id in triage))
     await llm.aclose()
+    results = [r for r in outcomes if r is not None]
+    if len(results) < len(outcomes):
+        print(
+            f"\n{len(outcomes) - len(results)} sites not classified: spend cap of "
+            f"${spend_cap_usd:.2f} reached (estimated ${spent_usd:.2f} spent). "
+            "Run the same command again with a higher cap to continue."
+        )
     write_jsonl(run_dir / "checkpoint.jsonl", results)
-    return list(results)
+    return results
 
 
 async def rescore(settings: Settings, sites: list[Site], run_dir: Path) -> list[SiteResult]:
